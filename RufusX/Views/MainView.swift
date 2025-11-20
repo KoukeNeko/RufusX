@@ -21,7 +21,12 @@ struct MainView: View {
         .padding()
         .fixedSize()
         .sheet(isPresented: $viewModel.showWindowsCustomization) {
-            WindowsCustomizationView(options: $viewModel.options.windowsCustomization)
+            WindowsCustomizationView(
+                options: $viewModel.options.windowsCustomization,
+                onConfirm: {
+                    viewModel.startOperation()
+                }
+            )
         }
         .sheet(isPresented: $viewModel.showChecksumDialog) {
             ChecksumView(

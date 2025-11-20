@@ -9,6 +9,7 @@ import SwiftUI
 
 struct WindowsCustomizationView: View {
     @Binding var options: WindowsCustomizationOptions
+    var onConfirm: () -> Void
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -77,6 +78,7 @@ struct WindowsCustomizationView: View {
                 Spacer()
 
                 Button("OK") {
+                    onConfirm()
                     dismiss()
                 }
                 .keyboardShortcut(.defaultAction)
@@ -94,6 +96,7 @@ struct WindowsCustomizationView: View {
 
 #Preview {
     WindowsCustomizationView(
-        options: .constant(WindowsCustomizationOptions())
+        options: .constant(WindowsCustomizationOptions()),
+        onConfirm: {}
     )
 }
