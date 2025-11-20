@@ -403,8 +403,9 @@ final class BootSectorService {
         }
 
         guard let mbrBinPath = mbrPath else {
-            logHandler("Syslinux MBR not found. BIOS boot may not work.", .warning)
-            logHandler("Install syslinux via: brew install syslinux", .info)
+            logHandler("⚠️ Syslinux MBR not found!", .warning)
+            logHandler("Legacy BIOS boot will NOT work without it.", .warning)
+            logHandler("Please run: 'brew install syslinux' in Terminal", .warning)
             return
         }
 

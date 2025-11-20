@@ -20,6 +20,8 @@ final class USBFormatterService {
         case isoMountFailed(String)
         case permissionDenied
         case cancelled
+        case largeFileOnFAT32(String)
+        case ddFailed(String)
 
         var errorDescription: String? {
             switch self {
@@ -39,6 +41,10 @@ final class USBFormatterService {
                 return "Permission denied. Please grant disk access."
             case .cancelled:
                 return "Operation cancelled"
+            case .largeFileOnFAT32(let filename):
+                return "File '\(filename)' is too large for FAT32. Please use ExFAT or NTFS."
+            case .ddFailed(let message):
+                return "DD Write failed: \(message)"
             }
         }
     }
@@ -63,6 +69,29 @@ final class USBFormatterService {
     ) async throws {
 
         isCancelled = false
+
+        // DD Mode Path
+        if options.ddMode, let isoPath = options.isoFilePath {
+            progressHandler(.preparing)
+            try await writeImageDD(
+                device: device,
+                isoPath: isoPath,
+                progressHandler: progressHandler,
+                logHandler: logHandler
+            )
+            
+            logHandler("DD Write completed successfully", .success)
+            progressHandler(.completed)
+            return
+        }
+
+        // Standard Mode Path
+        
+        // Pre-flight Check: FAT32 > 4GB
+        if let isoPath = options.isoFilePath {
+            logHandler("Checking ISO requirements...", .info)
+            try await checkISORequirements(isoPath: isoPath, fileSystem: options.fileSystem)
+        }
 
         // Step 1: Get disk identifier BEFORE unmounting
         logHandler("Identifying device: \(device.name)", .info)
@@ -393,47 +422,76 @@ final class USBFormatterService {
 
         var copiedSize: Int64 = 0
         let fat32MaxSize: Int64 = 4_294_967_295 // 4GB - 1
+        let bufferSize = 4 * 1024 * 1024 // 4MB buffer
 
         for (index, file) in filesToCopy.enumerated() {
             if isCancelled { throw FormatterError.cancelled }
 
             let fileName = file.source.lastPathComponent
-            let progress = Double(copiedSize) / Double(max(totalSize, 1))
-
-            // Update UI on main thread
-            await MainActor.run {
-                progressHandler(.copying(progress: progress, currentFile: fileName))
-            }
-
+            
             // Create directory if needed
             let destDir = file.destination.deletingLastPathComponent()
             try fileManager.createDirectory(at: destDir, withIntermediateDirectories: true)
 
-            // Copy file - handle FAT32 4GB limit
+            // Check FAT32 limit
+            if file.size > fat32MaxSize {
+                await MainActor.run {
+                    logHandler("Warning: \(fileName) exceeds 4GB FAT32 limit", .warning)
+                }
+            }
+
+            // Remove existing file
             if fileManager.fileExists(atPath: file.destination.path) {
                 try fileManager.removeItem(at: file.destination)
             }
 
-            if file.size > fat32MaxSize {
-                // File exceeds FAT32 limit - log warning
-                await MainActor.run {
-                    logHandler("Warning: \(fileName) exceeds 4GB FAT32 limit (\(file.size / 1_073_741_824) GB)", .warning)
-                    logHandler("Consider using NTFS or exFAT for large files", .warning)
+            // Chunked copy
+            do {
+                let sourceHandle = try FileHandle(forReadingFrom: file.source)
+                
+                // Create empty file first
+                fileManager.createFile(atPath: file.destination.path, contents: nil)
+                let destHandle = try FileHandle(forWritingTo: file.destination)
+                
+                defer {
+                    try? sourceHandle.close()
+                    try? destHandle.close()
                 }
+                
+                var fileCopied: Int64 = 0
+                
+                while fileCopied < file.size {
+                    if isCancelled { throw FormatterError.cancelled }
+                    
+                    // Read chunk
+                    let data = try sourceHandle.read(upToCount: bufferSize) ?? Data()
+                    if data.isEmpty { break }
+                    
+                    // Write chunk
+                    try destHandle.write(contentsOf: data)
+                    
+                    fileCopied += Int64(data.count)
+                    copiedSize += Int64(data.count)
+                    
+                    // Update progress periodically (every 4MB or so)
+                    let progress = Double(copiedSize) / Double(max(totalSize, 1))
+                    await MainActor.run {
+                        progressHandler(.copying(progress: progress, currentFile: fileName))
+                    }
+                    
+                    // Yield to main thread to keep UI responsive
+                    await Task.yield()
+                }
+                
+            } catch {
+                throw FormatterError.copyFailed("Failed to copy \(fileName): \(error.localizedDescription)")
             }
 
-            try fileManager.copyItem(at: file.source, to: file.destination)
-
-            copiedSize += file.size
-
-            if index % 100 == 0 {
+            if index % 10 == 0 { // Log less frequently
                 await MainActor.run {
                     logHandler("Copied: \(fileName)", .info)
                 }
             }
-
-            // Yield to allow UI updates
-            await Task.yield()
         }
 
         await MainActor.run {
@@ -533,5 +591,128 @@ extension USBFormatterService {
         }
 
         return badBlockCount
+    }
+
+    // MARK: - Pre-flight Checks
+
+    private func checkISORequirements(isoPath: URL, fileSystem: FileSystemType) async throws {
+        guard fileSystem == .fat32 || fileSystem == .fat else { return }
+
+        // Mount ISO read-only to check file sizes
+        let mountPoint = try await mountISO(isoPath)
+        defer {
+            Task { try? await unmountISO(mountPoint) }
+        }
+
+        let fileManager = FileManager.default
+        let enumerator = fileManager.enumerator(
+            at: URL(fileURLWithPath: mountPoint),
+            includingPropertiesForKeys: [.fileSizeKey],
+            options: [.skipsHiddenFiles]
+        )
+
+        let limit: Int64 = 4_294_967_295 // 4GB - 1
+
+        while let fileURL = enumerator?.nextObject() as? URL {
+            let resources = try? fileURL.resourceValues(forKeys: [.fileSizeKey])
+            if let size = resources?.fileSize, Int64(size) > limit {
+                throw FormatterError.largeFileOnFAT32(fileURL.lastPathComponent)
+            }
+        }
+    }
+
+    // MARK: - DD Mode
+
+    private func writeImageDD(
+        device: USBDevice,
+        isoPath: URL,
+        progressHandler: @escaping (OperationStatus) -> Void,
+        logHandler: @escaping (String, LogLevel) -> Void
+    ) async throws {
+        
+        // 1. Unmount device
+        logHandler("Unmounting device for DD write...", .info)
+        try await unmountDevice(device)
+        
+        // 2. Get Raw Disk Identifier (e.g. /dev/rdisk2)
+        // We need to be careful here. 'device.id' might be "disk2".
+        // We want "/dev/rdisk2" for speed.
+        let diskID = try await getDiskIdentifier(for: device)
+        let rawDiskPath = "/dev/r\(diskID)"
+        
+        logHandler("Writing image to \(rawDiskPath) (DD Mode)...", .info)
+        logHandler("Warning: This will overwrite the entire drive!", .warning)
+        
+        // 3. Open ISO and Device
+        guard let isoHandle = try? FileHandle(forReadingFrom: isoPath) else {
+            throw FormatterError.ddFailed("Could not open ISO file")
+        }
+        
+        // We need to open the device for writing.
+        // Note: Writing to /dev/rdisk requires root privileges usually.
+        // If the app is not sandboxed or has privileges, this might work.
+        // Otherwise we might need to use 'dd' command with 'sudo' (which we can't easily do).
+        // Assuming the user has granted disk access or we are running with sufficient privs.
+        // If this fails, we might need to fallback to 'dd' command.
+        
+        // Let's try using 'dd' command first as it's more standard for this,
+        // but we can't easily get progress from 'dd' without signals.
+        // Swift FileHandle write to /dev/rdisk might fail if not root.
+        // However, 'diskutil' operations also require privs.
+        
+        // Let's try Swift FileHandle first.
+        guard let deviceHandle = FileHandle(forWritingAtPath: rawDiskPath) else {
+             // Fallback to /dev/diskN if rdiskN fails
+             if let safeHandle = FileHandle(forWritingAtPath: "/dev/\(diskID)") {
+                 logHandler("Using buffered I/O (/dev/\(diskID))", .info)
+                 try await writeDDLoop(
+                    source: isoHandle,
+                    dest: safeHandle,
+                    totalSize: (try? isoPath.resourceValues(forKeys: [.fileSizeKey]).fileSize).map(Int64.init) ?? 0,
+                    progressHandler: progressHandler
+                 )
+                 return
+             }
+             throw FormatterError.ddFailed("Could not open target device for writing. Check permissions.")
+        }
+        
+        try await writeDDLoop(
+            source: isoHandle,
+            dest: deviceHandle,
+            totalSize: (try? isoPath.resourceValues(forKeys: [.fileSizeKey]).fileSize).map(Int64.init) ?? 0,
+            progressHandler: progressHandler
+        )
+    }
+    
+    private func writeDDLoop(
+        source: FileHandle,
+        dest: FileHandle,
+        totalSize: Int64,
+        progressHandler: @escaping (OperationStatus) -> Void
+    ) async throws {
+        defer {
+            try? source.close()
+            try? dest.close()
+        }
+        
+        let bufferSize = 4 * 1024 * 1024 // 4MB
+        var written: Int64 = 0
+        
+        while true {
+            if isCancelled { throw FormatterError.cancelled }
+            
+            let data = try source.read(upToCount: bufferSize) ?? Data()
+            if data.isEmpty { break }
+            
+            try dest.write(contentsOf: data)
+            written += Int64(data.count)
+            
+            let progress = Double(written) / Double(max(totalSize, 1))
+            await MainActor.run {
+                progressHandler(.copying(progress: progress, currentFile: "Writing Image (DD)..."))
+            }
+            
+            await Task.yield()
+        }
     }
 }
