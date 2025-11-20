@@ -83,6 +83,7 @@ final class RufusViewModel: ObservableObject {
 
         status = .preparing
         startTimer()
+        driveManager.isPaused = true
         addLog("Starting operation on \(device.displayName)", level: .info)
 
         Task {
@@ -101,12 +102,18 @@ final class RufusViewModel: ObservableObject {
                         }
                     }
                 )
-                stopTimer()
+                await MainActor.run {
+                    self.stopTimer()
+                    self.driveManager.isPaused = false
+                    self.driveManager.refreshDevices()
+                }
             } catch {
                 await MainActor.run {
                     self.status = .failed(message: error.localizedDescription)
                     self.addLog("Error: \(error.localizedDescription)", level: .error)
                     self.stopTimer()
+                    self.driveManager.isPaused = false
+                    self.driveManager.refreshDevices()
                 }
             }
         }
@@ -117,6 +124,8 @@ final class RufusViewModel: ObservableObject {
         status = .ready
         stopTimer()
         elapsedTime = 0
+        driveManager.isPaused = false
+        driveManager.refreshDevices()
         addLog("Operation cancelled", level: .warning)
     }
 

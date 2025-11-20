@@ -12,6 +12,7 @@ import Combine
 final class DriveManager: ObservableObject {
     @Published private(set) var availableDevices: [USBDevice] = []
     @Published private(set) var isScanning: Bool = false
+    @Published var isPaused: Bool = false
 
     private var session: DASession?
     private var scanTimer: Timer?
@@ -64,7 +65,7 @@ final class DriveManager: ObservableObject {
     }
 
     private func scanForUSBDevices() {
-        guard !isScanning else { return }
+        guard !isScanning, !isPaused else { return }
 
         DispatchQueue.main.async {
             self.isScanning = true

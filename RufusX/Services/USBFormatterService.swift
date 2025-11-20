@@ -64,19 +64,24 @@ final class USBFormatterService {
 
         isCancelled = false
 
-        // Step 1: Unmount the device
-        logHandler("Unmounting device: \(device.name)", .info)
+        // Step 1: Get disk identifier BEFORE unmounting
+        logHandler("Identifying device: \(device.name)", .info)
         progressHandler(.preparing)
 
+        let diskIdentifier = try await getDiskIdentifier(for: device)
+        logHandler("Device identifier: \(diskIdentifier)", .info)
+
+        if isCancelled { throw FormatterError.cancelled }
+
+        // Step 2: Unmount the device
+        logHandler("Unmounting device...", .info)
         try await unmountDevice(device)
 
         if isCancelled { throw FormatterError.cancelled }
 
-        // Step 2: Format the device
+        // Step 3: Format the device
         logHandler("Formatting device with \(options.fileSystem.rawValue)", .info)
         progressHandler(.formatting(progress: 0.1))
-
-        let diskIdentifier = try await getDiskIdentifier(for: device)
         try await formatDevice(
             diskIdentifier: diskIdentifier,
             fileSystem: options.fileSystem,
@@ -86,7 +91,7 @@ final class USBFormatterService {
 
         if isCancelled { throw FormatterError.cancelled }
 
-        // Step 3: Mount ISO and copy files
+        // Step 4: Mount ISO and copy files
         if let isoPath = options.isoFilePath {
             logHandler("Mounting ISO: \(isoPath.lastPathComponent)", .info)
             progressHandler(.copying(progress: 0, currentFile: "Mounting ISO..."))
@@ -114,7 +119,7 @@ final class USBFormatterService {
                 logHandler: logHandler
             )
 
-            // Step 4: Setup boot sector
+            // Step 5: Setup boot sector
             let bootSectorService = BootSectorService()
             try await bootSectorService.setupBootSector(
                 diskIdentifier: diskIdentifier,
@@ -125,7 +130,7 @@ final class USBFormatterService {
                 logHandler: logHandler
             )
 
-            // Step 5: Create persistence partition for Linux if requested
+            // Step 6: Create persistence partition for Linux if requested
             if options.persistentPartitionSizeGB > 0 {
                 let persistenceService = PersistenceService()
                 let distroType = persistenceService.detectLinuxDistro(isoMountPoint: isoMountPoint)
@@ -342,10 +347,18 @@ final class USBFormatterService {
             let destDir = file.destination.deletingLastPathComponent()
             try fileManager.createDirectory(at: destDir, withIntermediateDirectories: true)
 
-            // Copy file
+            // Copy file - handle FAT32 4GB limit
             if fileManager.fileExists(atPath: file.destination.path) {
                 try fileManager.removeItem(at: file.destination)
             }
+
+            let fat32MaxSize: Int64 = 4_294_967_295 // 4GB - 1
+            if file.size > fat32MaxSize {
+                // File exceeds FAT32 limit - log warning
+                logHandler("Warning: \(fileName) exceeds 4GB FAT32 limit (\(file.size / 1_073_741_824) GB)", .warning)
+                logHandler("Consider using NTFS or exFAT for large files", .warning)
+            }
+
             try fileManager.copyItem(at: file.source, to: file.destination)
 
             copiedSize += file.size

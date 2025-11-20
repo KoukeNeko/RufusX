@@ -13,5 +13,6 @@ struct RufusXApp: App {
         WindowGroup {
             ContentView()
         }
+        .windowResizability(.contentSize)
     }
 }

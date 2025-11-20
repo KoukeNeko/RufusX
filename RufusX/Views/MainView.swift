@@ -18,8 +18,7 @@ struct MainView: View {
             BottomToolbar(viewModel: viewModel)
         }
         .padding()
-        .frame(minWidth: 480, minHeight: 720)
-        .frame(width: 500, height: 780)
+        .fixedSize()
         .sheet(isPresented: $viewModel.showWindowsCustomization) {
             WindowsCustomizationView(options: $viewModel.options.windowsCustomization)
         }
@@ -56,11 +55,9 @@ struct DrivePropertiesSection: View {
 
                     HStack {
                         Picker("", selection: $viewModel.selectedDevice) {
-                            if viewModel.driveManager.availableDevices.isEmpty {
-                                Text("No device found").tag(nil as USBDevice?)
-                            }
+                            Text("No device found").tag(nil as USBDevice?)
                             ForEach(viewModel.driveManager.availableDevices) { device in
-                                Text(device.displayName).tag(device as USBDevice?)
+                                Text(device.displayName).tag(Optional(device))
                             }
                         }
                         .labelsHidden()
