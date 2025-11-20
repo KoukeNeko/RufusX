@@ -55,7 +55,9 @@ struct DrivePropertiesSection: View {
 
                     HStack {
                         Picker("", selection: $viewModel.selectedDevice) {
-                            Text("No device found").tag(nil as USBDevice?)
+                            if viewModel.driveManager.availableDevices.isEmpty {
+                                Text("No device found").tag(nil as USBDevice?)
+                            }
                             ForEach(viewModel.driveManager.availableDevices) { device in
                                 Text(device.displayName).tag(Optional(device))
                             }

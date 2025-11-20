@@ -14,30 +14,32 @@ struct AboutView: View {
     private let buildNumber = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"
 
     var body: some View {
-        VStack(spacing: 20) {
+        VStack(spacing: 24) {
             // App Icon
             Image(nsImage: NSApplication.shared.applicationIconImage)
                 .resizable()
-                .frame(width: 64, height: 64)
+                .frame(width: 96, height: 96)
+                .shadow(radius: 4)
 
             // App Name and Version
             VStack(spacing: 4) {
                 Text("RufusX")
-                    .font(.title)
-                    .fontWeight(.bold)
+                    .font(.system(size: 24, weight: .bold))
 
                 Text("Version \(appVersion) (Build \(buildNumber))")
                     .font(.subheadline)
                     .foregroundColor(.secondary)
             }
 
-            Divider()
-
             // Description
             Text("A macOS utility for formatting and creating bootable USB flash drives.")
                 .multilineTextAlignment(.center)
                 .font(.body)
                 .padding(.horizontal)
+                .foregroundColor(.secondary)
+
+            Divider()
+                .padding(.horizontal, 40)
 
             // Credits
             VStack(spacing: 8) {
@@ -47,40 +49,34 @@ struct AboutView: View {
 
                 Link("Original Rufus by Pete Batard", destination: URL(string: "https://rufus.ie")!)
                     .font(.caption)
+                    .foregroundColor(.accentColor)
             }
 
             Spacer()
 
-            // License
-            GroupBox {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("License")
-                        .font(.headline)
+            // License & Source
+            HStack(spacing: 16) {
+                Link("License (GPL v3)", destination: URL(string: "https://www.gnu.org/licenses/gpl-3.0.html")!)
+                    .font(.caption)
+                
+                Text("•")
+                    .foregroundColor(.secondary)
 
-                    Text("This software is provided under the GPL v3 license.")
-                        .font(.caption)
-
-                    HStack {
-                        Link("View License", destination: URL(string: "https://www.gnu.org/licenses/gpl-3.0.html")!)
-                            .font(.caption)
-
-                        Spacer()
-
-                        Link("Source Code", destination: URL(string: "https://github.com")!)
-                            .font(.caption)
-                    }
-                }
-                .padding(8)
+                Link("Source Code", destination: URL(string: "https://github.com")!)
+                    .font(.caption)
             }
+            .padding(.bottom, 8)
 
             // Close Button
             Button("OK") {
                 dismiss()
             }
             .keyboardShortcut(.defaultAction)
+            .keyboardShortcut(.cancelAction)
+            .controlSize(.large)
         }
-        .padding()
-        .frame(width: 350, height: 420)
+        .padding(30)
+        .frame(width: 400, height: 480)
     }
 }
 

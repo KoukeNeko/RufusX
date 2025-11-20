@@ -423,6 +423,7 @@ final class USBFormatterService {
         var copiedSize: Int64 = 0
         let fat32MaxSize: Int64 = 4_294_967_295 // 4GB - 1
         let bufferSize = 4 * 1024 * 1024 // 4MB buffer
+        var lastProgressUpdate = Date()
 
         for (index, file) in filesToCopy.enumerated() {
             if isCancelled { throw FormatterError.cancelled }
@@ -473,14 +474,18 @@ final class USBFormatterService {
                     fileCopied += Int64(data.count)
                     copiedSize += Int64(data.count)
                     
-                    // Update progress periodically (every 4MB or so)
-                    let progress = Double(copiedSize) / Double(max(totalSize, 1))
-                    await MainActor.run {
-                        progressHandler(.copying(progress: progress, currentFile: fileName))
+                    // Update progress periodically (throttled to 0.1s)
+                    let now = Date()
+                    if now.timeIntervalSince(lastProgressUpdate) >= 0.1 {
+                        let progress = Double(copiedSize) / Double(max(totalSize, 1))
+                        await MainActor.run {
+                            progressHandler(.copying(progress: progress, currentFile: fileName))
+                        }
+                        lastProgressUpdate = now
+                        
+                        // Yield to main thread to keep UI responsive
+                        await Task.yield()
                     }
-                    
-                    // Yield to main thread to keep UI responsive
-                    await Task.yield()
                 }
                 
             } catch {
