@@ -468,28 +468,31 @@ final class USBFormatterService {
                     try? sourceHandle.close()
                     try? destHandle.close()
                 }
+                // Use 1MB chunks to avoid blocking the thread for too long on slow drives
+                let bufferSize = 1024 * 1024 // 1MB
+                var offset: UInt64 = 0
                 
-                var fileCopied: Int64 = 0
-                
-                var chunkCount = 0
-                
-                while fileCopied < file.size {
-                    if isCancelled { throw FormatterError.cancelled }
+                while offset < UInt64(file.size) {
+                    // Check for cancellation
+                    try Task.checkCancellation()
                     
-                    let finished = try autoreleasepool { () -> Bool in
-                        // Read chunk
+                    // Use autoreleasepool to keep memory usage low
+                    let bytesRead = try autoreleasepool { () -> Int in
+                        sourceHandle.seek(toFileOffset: offset)
                         let data = try sourceHandle.read(upToCount: bufferSize) ?? Data()
-                        if data.isEmpty { return true }
                         
-                        // Write chunk
+                        if data.isEmpty { return 0 }
+                        
+                        destHandle.seek(toFileOffset: offset)
                         try destHandle.write(contentsOf: data)
                         
-                        fileCopied += Int64(data.count)
-                        copiedSize += Int64(data.count)
-                        return false
+                        return data.count
                     }
                     
-                    if finished { break }
+                    if bytesRead == 0 { break }
+                    
+                    offset += UInt64(bytesRead)
+                    copiedSize += Int64(bytesRead)
                     
                     // Update progress periodically (throttled to 0.5s)
                     let now = Date()
@@ -505,11 +508,9 @@ final class USBFormatterService {
                         lastProgressUpdate = now
                     }
                     
-                    // Yield every 5 chunks (20MB) to prevent UI freeze
-                    chunkCount += 1
-                    if chunkCount % 5 == 0 {
-                        await Task.yield()
-                    }
+                    // Yield every chunk (1MB) to ensure UI responsiveness
+                    // Even on slow drives, 1MB should write relatively quickly
+                    await Task.yield()
                 }
                 
             } catch {

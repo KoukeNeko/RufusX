@@ -18,29 +18,24 @@ struct LogView: View {
         VStack(spacing: 16) {
             GroupBox(label: Text("Log").font(.headline)) {
                 ScrollViewReader { proxy in
-                    ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 4) {
-                            ForEach(logEntries) { entry in
-                                HStack(alignment: .top, spacing: 8) {
-                                    Text(entry.timestamp)
-                                        .font(.system(.caption, design: .monospaced))
-                                        .foregroundColor(.secondary)
+                    List(logEntries) { entry in
+                        HStack(alignment: .top, spacing: 8) {
+                            Text(entry.timestamp)
+                                .font(.system(.caption, design: .monospaced))
+                                .foregroundColor(.secondary)
 
-                                    Text(entry.message)
-                                        .font(.system(.body, design: .monospaced))
-                                        .foregroundColor(colorForLevel(entry.level))
-                                        .textSelection(.enabled)
-                                }
-                                .id(entry.id)
-                            }
+                            Text(entry.message)
+                                .font(.system(.body, design: .monospaced))
+                                .foregroundColor(colorForLevel(entry.level))
+                                .textSelection(.enabled)
                         }
-                        .padding(4)
+                        .id(entry.id)
                     }
+                    .listStyle(.plain)
                     .onChange(of: logEntries.count) { _ in
                         if autoScroll, let lastId = logEntries.last?.id {
-                            withAnimation {
-                                proxy.scrollTo(lastId, anchor: .bottom)
-                            }
+                            // Remove animation for performance
+                            proxy.scrollTo(lastId, anchor: .bottom)
                         }
                     }
                 }
