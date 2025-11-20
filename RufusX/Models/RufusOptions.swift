@@ -130,6 +130,17 @@ struct ISODownloadOptions {
     var useExternalBrowser: Bool = false
 }
 
+// MARK: - Boot Selection
+
+enum BootSelection: String, CaseIterable, Identifiable {
+    case nonBootable = "Non bootable"
+    case diskOrIso = "Disk or ISO image"
+    // Future: case freeDOS = "FreeDOS"
+    // Future: case syslinux = "Syslinux"
+
+    var id: String { rawValue }
+}
+
 // MARK: - Advanced Drive Properties
 
 struct AdvancedDriveProperties {
@@ -151,29 +162,63 @@ struct AdvancedFormatOptions {
 // MARK: - Main Rufus Options
 
 struct RufusOptions {
-    // Drive Properties
-    var selectedDeviceID: String = ""
-    var isoFilePath: URL? = nil
-    var persistentPartitionSizeGB: Double = 0
-    var partitionScheme: PartitionScheme = .mbr
-    var targetSystem: TargetSystem = .biosOrUefi
-    var advancedDriveProperties: AdvancedDriveProperties = AdvancedDriveProperties()
+    var device: USBDevice?
+    var bootSelection: BootSelection
+    var partitionScheme: PartitionScheme
+    var targetSystem: TargetSystem
+    var volumeLabel: String
+    var fileSystem: FileSystemType
+    var clusterSize: ClusterSize
+    var quickFormat: Bool
+    var createExtendedLabel: Bool
+    var checkDeviceForBadBlocks: Bool
+    var isoFilePath: URL?
+    var persistentPartitionSizeGB: Int
+    var ddMode: Bool
+    
+    // Advanced Options
+    var advancedDriveProperties: AdvancedDriveProperties
+    var advancedFormatOptions: AdvancedFormatOptions
+    var windowsCustomization: WindowsCustomizationOptions
+    var downloadOptions: ISODownloadOptions
 
-    // Format Options
-    var volumeLabel: String = "RufusX"
-    var fileSystem: FileSystemType = .fat32
-    var clusterSize: ClusterSize = .auto
-    var advancedFormatOptions: AdvancedFormatOptions = AdvancedFormatOptions()
-
-    // Image Options (for Windows ISO)
-    var imageOption: ImageOption = .standardInstallation
-    var windowsCustomization: WindowsCustomizationOptions = WindowsCustomizationOptions()
-
-    // Download Options
-    var downloadOptions = ISODownloadOptions()
-
-    // DD Mode
-    var ddMode: Bool = false
+    init(
+        device: USBDevice? = nil,
+        bootSelection: BootSelection = .diskOrIso,
+        partitionScheme: PartitionScheme = .mbr,
+        targetSystem: TargetSystem = .biosOrUefi,
+        volumeLabel: String = "RufusX",
+        fileSystem: FileSystemType = .fat32,
+        clusterSize: ClusterSize = .auto,
+        quickFormat: Bool = true,
+        createExtendedLabel: Bool = true,
+        checkDeviceForBadBlocks: Bool = false,
+        isoFilePath: URL? = nil,
+        persistentPartitionSizeGB: Int = 0,
+        ddMode: Bool = false,
+        advancedDriveProperties: AdvancedDriveProperties = AdvancedDriveProperties(),
+        advancedFormatOptions: AdvancedFormatOptions = AdvancedFormatOptions(),
+        windowsCustomization: WindowsCustomizationOptions = WindowsCustomizationOptions(),
+        downloadOptions: ISODownloadOptions = ISODownloadOptions()
+    ) {
+        self.device = device
+        self.bootSelection = bootSelection
+        self.partitionScheme = partitionScheme
+        self.targetSystem = targetSystem
+        self.volumeLabel = volumeLabel
+        self.fileSystem = fileSystem
+        self.clusterSize = clusterSize
+        self.quickFormat = quickFormat
+        self.createExtendedLabel = createExtendedLabel
+        self.checkDeviceForBadBlocks = checkDeviceForBadBlocks
+        self.isoFilePath = isoFilePath
+        self.persistentPartitionSizeGB = persistentPartitionSizeGB
+        self.ddMode = ddMode
+        self.advancedDriveProperties = advancedDriveProperties
+        self.advancedFormatOptions = advancedFormatOptions
+        self.windowsCustomization = windowsCustomization
+        self.downloadOptions = downloadOptions
+    }
 }
 
 // MARK: - USB Device

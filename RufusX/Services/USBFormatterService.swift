@@ -121,8 +121,8 @@ final class USBFormatterService {
 
         if isCancelled { throw FormatterError.cancelled }
 
-        // Step 4: Mount ISO and copy files
-        if let isoPath = options.isoFilePath {
+        // Step 4: Mount ISO and copy files (Only for DiskOrIso mode)
+        if options.bootSelection == .diskOrIso, let isoPath = options.isoFilePath {
             logHandler("Mounting ISO: \(isoPath.lastPathComponent)", .info)
             progressHandler(.copying(progress: 0, currentFile: "Mounting ISO..."))
 
@@ -474,16 +474,20 @@ final class USBFormatterService {
                     fileCopied += Int64(data.count)
                     copiedSize += Int64(data.count)
                     
-                    // Update progress periodically (throttled to 0.1s)
+                    // Update progress periodically (throttled to 0.5s)
                     let now = Date()
-                    if now.timeIntervalSince(lastProgressUpdate) >= 0.1 {
+                    if now.timeIntervalSince(lastProgressUpdate) >= 0.5 {
                         let progress = Double(copiedSize) / Double(max(totalSize, 1))
-                        await MainActor.run {
+                        
+                        // Use Task.detached to avoid inheriting actor context for the update
+                        Task.detached { @MainActor in
                             progressHandler(.copying(progress: progress, currentFile: fileName))
                         }
                         lastProgressUpdate = now
-                        
-                        // Yield to main thread to keep UI responsive
+                    }
+                    
+                    // Yield more aggressively
+                    if index % 5 == 0 {
                         await Task.yield()
                     }
                 }

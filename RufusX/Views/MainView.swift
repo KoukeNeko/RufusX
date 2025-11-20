@@ -76,36 +76,42 @@ struct DrivePropertiesSection: View {
                         .font(.headline)
 
                     HStack {
-                        Text(viewModel.options.isoFilePath?.lastPathComponent ?? "Disk or ISO image (Please select)")
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(6)
-                            .background(Color(NSColor.textBackgroundColor))
-                            .cornerRadius(4)
-
-                        Button(action: {
-                            if viewModel.options.isoFilePath != nil {
-                                viewModel.showChecksumDialog = true
+                        // Boot Selection Picker
+                        Picker("", selection: $viewModel.options.bootSelection) {
+                            ForEach(BootSelection.allCases) { selection in
+                                Text(selection.rawValue).tag(selection)
                             }
-                        }) {
-                            Image(systemName: "checkmark.circle")
                         }
-                        .disabled(viewModel.options.isoFilePath == nil)
+                        .labelsHidden()
+                        .frame(width: 140)
 
-                        Menu {
-                            Button("SELECT") {
+                        if viewModel.options.bootSelection == .diskOrIso {
+                            // ISO Selection Button
+                            Button(action: {
                                 viewModel.selectISO()
+                            }) {
+                                HStack {
+                                    Text(viewModel.options.isoFilePath?.lastPathComponent ?? "SELECT")
+                                        .truncationMode(.middle)
+                                    if viewModel.options.isoFilePath == nil {
+                                        Image(systemName: "chevron.down")
+                                    }
+                                }
+                                .frame(maxWidth: .infinity)
                             }
-                            Button("DOWNLOAD") {
-                                viewModel.showDownloadDialog = true
+                            .buttonStyle(.bordered)
+                            
+                            if viewModel.options.isoFilePath != nil {
+                                Button(action: {
+                                    viewModel.showChecksumDialog = true
+                                }) {
+                                    Image(systemName: "checkmark.circle")
+                                }
+                                .help("Compute checksum")
                             }
-                        } label: {
-                            HStack {
-                                Text("SELECT")
-                                Image(systemName: "chevron.down")
-                            }
+                        } else {
+                            Spacer()
                         }
-                        .menuStyle(.borderlessButton)
-                        .frame(width: 100)
                     }
                 }
 
@@ -431,5 +437,5 @@ struct BottomToolbar: View {
 }
 
 #Preview {
-    MainView()
+    MainView(viewModel: RufusViewModel())
 }
