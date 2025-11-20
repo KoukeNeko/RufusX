@@ -99,7 +99,7 @@ final class RufusViewModel: ObservableObject {
         // This avoids hopping to the MainActor for every log message
         let logBuffer = self.logBufferHelper
         
-        Task.detached(priority: .userInitiated) { [options, formatterService, logBuffer] in
+        Task.detached(priority: .utility) { [options, formatterService, logBuffer] in
             do {
                 try await formatterService.formatUSBDrive(
                     device: device,

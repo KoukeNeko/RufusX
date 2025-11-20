@@ -508,9 +508,14 @@ final class USBFormatterService {
                         lastProgressUpdate = now
                     }
                     
-                    // Yield every chunk (1MB) to ensure UI responsiveness
-                    // Even on slow drives, 1MB should write relatively quickly
+                    // Yield every chunk (256KB) to ensure UI responsiveness
                     await Task.yield()
+                    
+                    // Force a small sleep every 10MB (40 chunks) to give Main Thread breathing room
+                    // This is critical for preventing UI freezes on slow devices or high system load
+                    if (offset / UInt64(bufferSize)) % 40 == 0 {
+                        try await Task.sleep(nanoseconds: 10 * 1_000_000) // 10ms
+                    }
                 }
                 
             } catch {
