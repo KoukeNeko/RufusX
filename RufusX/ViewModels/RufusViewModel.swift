@@ -32,6 +32,7 @@ final class RufusViewModel: ObservableObject {
     // MARK: - Dependencies
 
     let driveManager = DriveManager()
+    private let formatterService = USBFormatterService()
 
     // MARK: - Private Properties
 
@@ -78,21 +79,49 @@ final class RufusViewModel: ObservableObject {
     }
 
     func startOperation() {
-        guard canStart else { return }
+        guard canStart, let device = selectedDevice else { return }
 
         status = .preparing
         startTimer()
+        addLog("Starting operation on \(device.displayName)", level: .info)
 
-        // Simulate the operation for now
         Task {
-            await simulateOperation()
+            do {
+                try await formatterService.formatUSBDrive(
+                    device: device,
+                    options: options,
+                    progressHandler: { [weak self] newStatus in
+                        Task { @MainActor in
+                            self?.status = newStatus
+                        }
+                    },
+                    logHandler: { [weak self] message, level in
+                        Task { @MainActor in
+                            self?.addLog(message, level: level)
+                        }
+                    }
+                )
+                stopTimer()
+            } catch {
+                await MainActor.run {
+                    self.status = .failed(message: error.localizedDescription)
+                    self.addLog("Error: \(error.localizedDescription)", level: .error)
+                    self.stopTimer()
+                }
+            }
         }
     }
 
     func cancelOperation() {
+        formatterService.cancel()
         status = .ready
         stopTimer()
         elapsedTime = 0
+        addLog("Operation cancelled", level: .warning)
+    }
+
+    func addLog(_ message: String, level: LogLevel = .info) {
+        logEntries.append(LogEntry(message: message, level: level))
     }
 
     func refreshDevices() {
@@ -165,33 +194,5 @@ final class RufusViewModel: ObservableObject {
     private func stopTimer() {
         timer?.invalidate()
         timer = nil
-    }
-
-    private func simulateOperation() async {
-        // Formatting phase
-        for i in 0...100 {
-            try? await Task.sleep(nanoseconds: 20_000_000)
-            status = .formatting(progress: Double(i) / 100.0)
-        }
-
-        // Copying phase
-        let sampleFiles = ["boot.wim", "install.wim", "sources/", "EFI/"]
-        for (index, file) in sampleFiles.enumerated() {
-            let baseProgress = Double(index) / Double(sampleFiles.count)
-            for i in 0...25 {
-                try? await Task.sleep(nanoseconds: 10_000_000)
-                let progress = baseProgress + (Double(i) / 25.0) / Double(sampleFiles.count)
-                status = .copying(progress: progress, currentFile: file)
-            }
-        }
-
-        // Verifying phase
-        for i in 0...100 {
-            try? await Task.sleep(nanoseconds: 10_000_000)
-            status = .verifying(progress: Double(i) / 100.0)
-        }
-
-        status = .completed
-        stopTimer()
     }
 }
