@@ -113,6 +113,32 @@ final class USBFormatterService {
                 progressHandler: progressHandler,
                 logHandler: logHandler
             )
+
+            // Step 4: Setup boot sector
+            let bootSectorService = BootSectorService()
+            try await bootSectorService.setupBootSector(
+                diskIdentifier: diskIdentifier,
+                usbMountPoint: usbMountPoint,
+                isoMountPoint: isoMountPoint,
+                targetSystem: options.targetSystem,
+                partitionScheme: options.partitionScheme,
+                logHandler: logHandler
+            )
+
+            // Step 5: Create persistence partition for Linux if requested
+            if options.persistentPartitionSizeGB > 0 {
+                let persistenceService = PersistenceService()
+                let distroType = persistenceService.detectLinuxDistro(isoMountPoint: isoMountPoint)
+
+                if distroType != .other || options.persistentPartitionSizeGB > 0 {
+                    try await persistenceService.createPersistencePartition(
+                        diskIdentifier: diskIdentifier,
+                        sizeGB: options.persistentPartitionSizeGB,
+                        distroType: distroType,
+                        logHandler: logHandler
+                    )
+                }
+            }
         }
 
         if isCancelled { throw FormatterError.cancelled }
