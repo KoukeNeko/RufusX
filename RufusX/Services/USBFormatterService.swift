@@ -509,50 +509,7 @@ final class USBFormatterService {
     }
 
     private func runCommand(_ command: String, arguments: [String]) async throws -> (output: String, error: String, exitCode: Int32) {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: command)
-        process.arguments = arguments
-
-        let outputPipe = Pipe()
-        let errorPipe = Pipe()
-        process.standardOutput = outputPipe
-        process.standardError = errorPipe
-
-        self.currentProcess = process
-
-        return try await withCheckedThrowingContinuation { continuation in
-            var hasResumed = false
-
-            process.terminationHandler = { [weak self] terminatedProcess in
-                self?.currentProcess = nil
-
-                guard !hasResumed else { return }
-                hasResumed = true
-
-                // Check if cancelled
-                if self?.isCancelled == true {
-                    continuation.resume(returning: ("", "Operation cancelled", -1))
-                    return
-                }
-
-                let outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
-                let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
-
-                let output = String(data: outputData, encoding: .utf8) ?? ""
-                let error = String(data: errorData, encoding: .utf8) ?? ""
-
-                continuation.resume(returning: (output, error, terminatedProcess.terminationStatus))
-            }
-
-            do {
-                try process.run()
-            } catch {
-                guard !hasResumed else { return }
-                hasResumed = true
-                self.currentProcess = nil
-                continuation.resume(throwing: error)
-            }
-        }
+        return try await ShellService.shared.runCommand(command, arguments: arguments)
     }
 }
 
@@ -644,84 +601,49 @@ extension USBFormatterService {
         try await unmountDevice(device)
         
         // 2. Get Raw Disk Identifier (e.g. /dev/rdisk2)
-        // We need to be careful here. 'device.id' might be "disk2".
-        // We want "/dev/rdisk2" for speed.
         let diskID = try await getDiskIdentifier(for: device)
         let rawDiskPath = "/dev/r\(diskID)"
         
         logHandler("Writing image to \(rawDiskPath) (DD Mode)...", .info)
         logHandler("Warning: This will overwrite the entire drive!", .warning)
         
-        // 3. Open ISO and Device
-        guard let isoHandle = try? FileHandle(forReadingFrom: isoPath) else {
-            throw FormatterError.ddFailed("Could not open ISO file")
-        }
+        // 3. Use dd with admin privileges
+        // Note: We can't easily get progress from dd without signals (SIGINFO),
+        // which is hard to capture via Process.
+        // So we'll use a spinner or indeterminate progress for now,
+        // or we could try to use 'pv' if installed, but let's stick to standard tools.
         
-        // We need to open the device for writing.
-        // Note: Writing to /dev/rdisk requires root privileges usually.
-        // If the app is not sandboxed or has privileges, this might work.
-        // Otherwise we might need to use 'dd' command with 'sudo' (which we can't easily do).
-        // Assuming the user has granted disk access or we are running with sufficient privs.
-        // If this fails, we might need to fallback to 'dd' command.
+        progressHandler(.copying(progress: 0.5, currentFile: "Writing Image (DD)..."))
         
-        // Let's try using 'dd' command first as it's more standard for this,
-        // but we can't easily get progress from 'dd' without signals.
-        // Swift FileHandle write to /dev/rdisk might fail if not root.
-        // However, 'diskutil' operations also require privs.
-        
-        // Let's try Swift FileHandle first.
-        guard let deviceHandle = FileHandle(forWritingAtPath: rawDiskPath) else {
-             // Fallback to /dev/diskN if rdiskN fails
-             if let safeHandle = FileHandle(forWritingAtPath: "/dev/\(diskID)") {
-                 logHandler("Using buffered I/O (/dev/\(diskID))", .info)
-                 try await writeDDLoop(
-                    source: isoHandle,
-                    dest: safeHandle,
-                    totalSize: (try? isoPath.resourceValues(forKeys: [.fileSizeKey]).fileSize).map(Int64.init) ?? 0,
-                    progressHandler: progressHandler
-                 )
-                 return
-             }
-             throw FormatterError.ddFailed("Could not open target device for writing. Check permissions.")
-        }
-        
-        try await writeDDLoop(
-            source: isoHandle,
-            dest: deviceHandle,
-            totalSize: (try? isoPath.resourceValues(forKeys: [.fileSizeKey]).fileSize).map(Int64.init) ?? 0,
-            progressHandler: progressHandler
+        let result = try await ShellService.shared.runCommandWithAdminPrivileges(
+            "/bin/dd",
+            arguments: [
+                "if=\(isoPath.path)",
+                "of=\(rawDiskPath)",
+                "bs=4m",
+                "status=progress" // GNU dd supports this, BSD dd (macOS) supports SIGINFO
+            ]
         )
+        
+        if result.exitCode != 0 {
+            // Fallback to /dev/diskN if rdiskN fails
+            logHandler("Retrying with buffered I/O (/dev/\(diskID))...", .warning)
+             let retryResult = try await ShellService.shared.runCommandWithAdminPrivileges(
+                "/bin/dd",
+                arguments: [
+                    "if=\(isoPath.path)",
+                    "of=/dev/\(diskID)",
+                    "bs=4m"
+                ]
+            )
+            
+            if retryResult.exitCode != 0 {
+                throw FormatterError.ddFailed(retryResult.error)
+            }
+        }
+        
+        progressHandler(.copying(progress: 1.0, currentFile: "DD Write Complete"))
     }
     
-    private func writeDDLoop(
-        source: FileHandle,
-        dest: FileHandle,
-        totalSize: Int64,
-        progressHandler: @escaping (OperationStatus) -> Void
-    ) async throws {
-        defer {
-            try? source.close()
-            try? dest.close()
-        }
-        
-        let bufferSize = 4 * 1024 * 1024 // 4MB
-        var written: Int64 = 0
-        
-        while true {
-            if isCancelled { throw FormatterError.cancelled }
-            
-            let data = try source.read(upToCount: bufferSize) ?? Data()
-            if data.isEmpty { break }
-            
-            try dest.write(contentsOf: data)
-            written += Int64(data.count)
-            
-            let progress = Double(written) / Double(max(totalSize, 1))
-            await MainActor.run {
-                progressHandler(.copying(progress: progress, currentFile: "Writing Image (DD)..."))
-            }
-            
-            await Task.yield()
-        }
-    }
+
 }

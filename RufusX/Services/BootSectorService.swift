@@ -318,7 +318,7 @@ final class BootSectorService {
         // Note: This requires admin privileges
         logHandler("Setting partition as active...", .info)
 
-        let result = try await runCommand(
+        let result = try await runCommandWithAdminPrivileges(
             "/usr/sbin/fdisk",
             arguments: ["-e", "/dev/\(diskIdentifier)"],
             input: "f 1\nw\nq\n"
@@ -412,7 +412,7 @@ final class BootSectorService {
         // Write MBR to disk
         logHandler("Installing syslinux MBR...", .info)
 
-        let result = try await runCommand(
+        let result = try await runCommandWithAdminPrivileges(
             "/bin/dd",
             arguments: [
                 "conv=notrunc",
@@ -432,60 +432,21 @@ final class BootSectorService {
 
     // MARK: - Helper Methods
 
+    // MARK: - Helper Methods
+    
     private func runCommand(
         _ command: String,
         arguments: [String],
         input: String? = nil
     ) async throws -> (output: String, error: String, exitCode: Int32) {
+        return try await ShellService.shared.runCommand(command, arguments: arguments, input: input)
+    }
 
-        return try await withCheckedThrowingContinuation { continuation in
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: command)
-            process.arguments = arguments
-
-            let outputPipe = Pipe()
-            let errorPipe = Pipe()
-            let inputPipe = Pipe()
-
-            process.standardOutput = outputPipe
-            process.standardError = errorPipe
-            process.standardInput = inputPipe
-
-            do {
-                try process.run()
-
-                if let input = input, let inputData = input.data(using: .utf8) {
-                    // Handle input writing safely
-                    do {
-                        if #available(macOS 10.15.4, *) {
-                            try inputPipe.fileHandleForWriting.write(contentsOf: inputData)
-                        } else {
-                            // Fallback for older macOS, but riskier. 
-                            // Ideally we should use the new API.
-                            inputPipe.fileHandleForWriting.write(inputData)
-                        }
-                        try inputPipe.fileHandleForWriting.close()
-                    } catch {
-                        // Ignore broken pipe errors if process exited early
-                        // But log it if needed (continuation handles the result)
-                    }
-                } else {
-                    // Close input pipe if no input to signal EOF
-                    try? inputPipe.fileHandleForWriting.close()
-                }
-
-                process.waitUntilExit()
-
-                let outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
-                let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
-
-                let output = String(data: outputData, encoding: .utf8) ?? ""
-                let error = String(data: errorData, encoding: .utf8) ?? ""
-
-                continuation.resume(returning: (output, error, process.terminationStatus))
-            } catch {
-                continuation.resume(throwing: error)
-            }
-        }
+    private func runCommandWithAdminPrivileges(
+        _ command: String,
+        arguments: [String],
+        input: String? = nil
+    ) async throws -> (output: String, error: String, exitCode: Int32) {
+        return try await ShellService.shared.runCommandWithAdminPrivileges(command, arguments: arguments, input: input)
     }
 }
