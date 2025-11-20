@@ -471,18 +471,25 @@ final class USBFormatterService {
                 
                 var fileCopied: Int64 = 0
                 
+                var chunkCount = 0
+                
                 while fileCopied < file.size {
                     if isCancelled { throw FormatterError.cancelled }
                     
-                    // Read chunk
-                    let data = try sourceHandle.read(upToCount: bufferSize) ?? Data()
-                    if data.isEmpty { break }
+                    let finished = try autoreleasepool { () -> Bool in
+                        // Read chunk
+                        let data = try sourceHandle.read(upToCount: bufferSize) ?? Data()
+                        if data.isEmpty { return true }
+                        
+                        // Write chunk
+                        try destHandle.write(contentsOf: data)
+                        
+                        fileCopied += Int64(data.count)
+                        copiedSize += Int64(data.count)
+                        return false
+                    }
                     
-                    // Write chunk
-                    try destHandle.write(contentsOf: data)
-                    
-                    fileCopied += Int64(data.count)
-                    copiedSize += Int64(data.count)
+                    if finished { break }
                     
                     // Update progress periodically (throttled to 0.5s)
                     let now = Date()
@@ -496,8 +503,9 @@ final class USBFormatterService {
                         lastProgressUpdate = now
                     }
                     
-                    // Yield more aggressively
-                    if index % 5 == 0 {
+                    // Yield every 5 chunks (20MB) to prevent UI freeze
+                    chunkCount += 1
+                    if chunkCount % 5 == 0 {
                         await Task.yield()
                     }
                 }
