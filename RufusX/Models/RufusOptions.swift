@@ -36,9 +36,14 @@ enum TargetSystem: String, CaseIterable, Identifiable {
 // MARK: - File System
 
 enum FileSystemType: String, CaseIterable, Identifiable {
+    case fat = "FAT"
     case fat32 = "FAT32"
     case ntfs = "NTFS"
     case exfat = "exFAT"
+    case udf = "UDF"
+    case refs = "ReFS"
+    case ext2 = "ext2"
+    case ext3 = "ext3"
     case ext4 = "ext4"
     case apfs = "APFS"
 
@@ -46,10 +51,15 @@ enum FileSystemType: String, CaseIterable, Identifiable {
 
     var displayName: String {
         switch self {
+        case .fat: return "FAT"
         case .fat32: return "FAT32 (Default)"
         case .ntfs: return "NTFS"
         case .exfat: return "exFAT"
-        case .ext4: return "ext4 (Linux)"
+        case .udf: return "UDF"
+        case .refs: return "ReFS"
+        case .ext2: return "ext2"
+        case .ext3: return "ext3"
+        case .ext4: return "ext4"
         case .apfs: return "APFS (macOS)"
         }
     }

@@ -11,20 +11,35 @@ struct DownloadISOView: View {
     @Binding var options: ISODownloadOptions
     @Environment(\.dismiss) private var dismiss
 
-    private let versions = ["Windows 11", "Windows 10", "Ubuntu", "Debian", "Fedora"]
+    private let versions = [
+        "Windows 11",
+        "Windows 10",
+        "Windows 8.1",
+        "UEFI Shell",
+        "Ubuntu",
+        "Debian",
+        "Fedora"
+    ]
     private let windowsReleases = [
         "24H2 (Build 26100 - 2024.10)",
         "23H2 v2 (Build 22631.2861 - 2024.01)",
         "22H2 v1 (Build 22621.525 - 2022.10)"
     ]
-    private let editions = ["Windows 11 Home/Pro/Edu", "Windows 11 Pro", "Windows 11 Enterprise"]
+    private let editions = [
+        "Windows 11 Home/Pro/Edu",
+        "Windows 11 Pro",
+        "Windows 11 Enterprise"
+    ]
     private let languages = [
         "English International",
         "English",
         "Chinese (Traditional)",
         "Chinese (Simplified)",
         "Japanese",
-        "Korean"
+        "Korean",
+        "French",
+        "German",
+        "Spanish"
     ]
     private let architectures = ["x64", "ARM64"]
 

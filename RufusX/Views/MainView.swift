@@ -32,6 +32,12 @@ struct MainView: View {
         .sheet(isPresented: $viewModel.showDownloadDialog) {
             DownloadISOView(options: $viewModel.options.downloadOptions)
         }
+        .sheet(isPresented: $viewModel.showLogDialog) {
+            LogView(logEntries: $viewModel.logEntries)
+        }
+        .sheet(isPresented: $viewModel.showAboutDialog) {
+            AboutView()
+        }
     }
 }
 
@@ -360,7 +366,9 @@ struct BottomToolbar: View {
                 .buttonStyle(.plain)
                 .help("Language")
 
-                Button(action: {}) {
+                Button(action: {
+                    viewModel.showAboutDialog = true
+                }) {
                     Image(systemName: "info.circle")
                 }
                 .buttonStyle(.plain)
@@ -372,7 +380,9 @@ struct BottomToolbar: View {
                 .buttonStyle(.plain)
                 .help("Settings")
 
-                Button(action: {}) {
+                Button(action: {
+                    viewModel.showLogDialog = true
+                }) {
                     Image(systemName: "keyboard")
                 }
                 .buttonStyle(.plain)

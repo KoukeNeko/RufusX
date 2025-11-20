@@ -24,7 +24,10 @@ final class RufusViewModel: ObservableObject {
     @Published var showWindowsCustomization: Bool = false
     @Published var showChecksumDialog: Bool = false
     @Published var showDownloadDialog: Bool = false
+    @Published var showLogDialog: Bool = false
+    @Published var showAboutDialog: Bool = false
     @Published var isoChecksum = ISOChecksum()
+    @Published var logEntries: [LogEntry] = []
 
     // MARK: - Dependencies
 
