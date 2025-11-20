@@ -304,10 +304,13 @@ final class USBFormatterService {
         let maxAttempts = 10
         let delayNanoseconds: UInt64 = 1_000_000_000
 
+        // After formatting, the partition is usually disk23s1 for disk23
+        let partitionIdentifier = "\(diskIdentifier)s1"
+
         for _ in 0..<maxAttempts {
             let result = try await runCommand(
                 "/usr/sbin/diskutil",
-                arguments: ["info", diskIdentifier]
+                arguments: ["info", partitionIdentifier]
             )
 
             if result.exitCode == 0 {
@@ -417,8 +420,19 @@ final class USBFormatterService {
         self.currentProcess = process
 
         return try await withCheckedThrowingContinuation { continuation in
-            process.terminationHandler = { [weak self] process in
+            var hasResumed = false
+
+            process.terminationHandler = { [weak self] terminatedProcess in
                 self?.currentProcess = nil
+
+                guard !hasResumed else { return }
+                hasResumed = true
+
+                // Check if cancelled
+                if self?.isCancelled == true {
+                    continuation.resume(returning: ("", "Operation cancelled", -1))
+                    return
+                }
 
                 let outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
                 let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
@@ -426,12 +440,14 @@ final class USBFormatterService {
                 let output = String(data: outputData, encoding: .utf8) ?? ""
                 let error = String(data: errorData, encoding: .utf8) ?? ""
 
-                continuation.resume(returning: (output, error, process.terminationStatus))
+                continuation.resume(returning: (output, error, terminatedProcess.terminationStatus))
             }
 
             do {
                 try process.run()
             } catch {
+                guard !hasResumed else { return }
+                hasResumed = true
                 self.currentProcess = nil
                 continuation.resume(throwing: error)
             }
