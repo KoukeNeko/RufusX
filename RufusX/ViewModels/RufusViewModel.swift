@@ -95,7 +95,11 @@ final class RufusViewModel: ObservableObject {
         driveManager.isPaused = true
         addLog("Starting operation on \(device.displayName)", level: .info)
 
-        Task.detached(priority: .userInitiated) { [options, formatterService] in
+        // Capture the buffer instance to use directly from background threads
+        // This avoids hopping to the MainActor for every log message
+        let logBuffer = self.logBufferHelper
+        
+        Task.detached(priority: .userInitiated) { [options, formatterService, logBuffer] in
             do {
                 try await formatterService.formatUSBDrive(
                     device: device,
@@ -106,9 +110,8 @@ final class RufusViewModel: ObservableObject {
                         }
                     },
                     logHandler: { message, level in
-                        Task { @MainActor in
-                            self.addLog(message, level: level)
-                        }
+                        // Write directly to buffer (thread-safe) without MainActor overhead
+                        logBuffer?.add(LogEntry(message: message, level: level))
                     }
                 )
                 await MainActor.run {
