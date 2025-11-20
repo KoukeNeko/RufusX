@@ -523,7 +523,7 @@ final class USBFormatterService {
             
             await MainActor.run {
                 progressHandler(.copying(progress: progress, currentFile: statusText))
-                logHandler("Copied: \(fileName)", .info)
+                logHandler("Copied: \(fileName) (\(sizeString))", .info)
             }
         }
 
