@@ -80,12 +80,13 @@ final class USBFormatterService {
         if isCancelled { throw FormatterError.cancelled }
 
         // Step 3: Format the device
-        logHandler("Formatting device with \(options.fileSystem.rawValue)", .info)
+        logHandler("Formatting device with \(options.fileSystem.rawValue) (\(options.partitionScheme.rawValue))", .info)
         progressHandler(.formatting(progress: 0.1))
         try await formatDevice(
             diskIdentifier: diskIdentifier,
             fileSystem: options.fileSystem,
             volumeLabel: options.volumeLabel,
+            partitionScheme: options.partitionScheme,
             progressHandler: progressHandler
         )
 
@@ -206,6 +207,7 @@ final class USBFormatterService {
         diskIdentifier: String,
         fileSystem: FileSystemType,
         volumeLabel: String,
+        partitionScheme: PartitionScheme,
         progressHandler: @escaping (OperationStatus) -> Void
     ) async throws {
 
@@ -232,9 +234,18 @@ final class USBFormatterService {
 
         progressHandler(.formatting(progress: 0.3))
 
+        // Map partition scheme to diskutil format
+        let scheme: String
+        switch partitionScheme {
+        case .mbr:
+            scheme = "MBR"
+        case .gpt:
+            scheme = "GPT"
+        }
+
         let result = try await runCommand(
             "/usr/sbin/diskutil",
-            arguments: ["eraseDisk", fsType, label, diskIdentifier]
+            arguments: ["eraseDisk", fsType, label, scheme, diskIdentifier]
         )
 
         progressHandler(.formatting(progress: 0.9))
@@ -301,28 +312,38 @@ final class USBFormatterService {
     }
 
     private func waitForMount(diskIdentifier: String) async throws -> String {
-        let maxAttempts = 10
+        let maxAttempts = 15
         let delayNanoseconds: UInt64 = 1_000_000_000
 
-        // After formatting, the partition is usually disk23s1 for disk23
-        let partitionIdentifier = "\(diskIdentifier)s1"
+        // Try different partition numbers (s1, s2) as GPT may have EFI partition
+        let partitionCandidates = ["\(diskIdentifier)s1", "\(diskIdentifier)s2"]
 
-        for _ in 0..<maxAttempts {
-            let result = try await runCommand(
-                "/usr/sbin/diskutil",
-                arguments: ["info", partitionIdentifier]
-            )
+        for attempt in 0..<maxAttempts {
+            for partitionIdentifier in partitionCandidates {
+                let result = try await runCommand(
+                    "/usr/sbin/diskutil",
+                    arguments: ["info", partitionIdentifier]
+                )
 
-            if result.exitCode == 0 {
-                for line in result.output.components(separatedBy: "\n") {
-                    if line.contains("Mount Point:") {
-                        let components = line.components(separatedBy: ":")
-                        if components.count >= 2 {
-                            let mountPoint = components[1].trimmingCharacters(in: .whitespaces)
-                            if !mountPoint.isEmpty && mountPoint != "(not mounted)" {
-                                return mountPoint
+                if result.exitCode == 0 {
+                    for line in result.output.components(separatedBy: "\n") {
+                        if line.contains("Mount Point:") {
+                            let components = line.components(separatedBy: ":")
+                            if components.count >= 2 {
+                                let mountPoint = components[1].trimmingCharacters(in: .whitespaces)
+                                if !mountPoint.isEmpty && mountPoint != "(not mounted)" {
+                                    return mountPoint
+                                }
                             }
                         }
+                    }
+
+                    // Try to mount if not mounted
+                    if attempt > 2 {
+                        _ = try await runCommand(
+                            "/usr/sbin/diskutil",
+                            arguments: ["mount", partitionIdentifier]
+                        )
                     }
                 }
             }
@@ -371,13 +392,18 @@ final class USBFormatterService {
         }
 
         var copiedSize: Int64 = 0
+        let fat32MaxSize: Int64 = 4_294_967_295 // 4GB - 1
 
         for (index, file) in filesToCopy.enumerated() {
             if isCancelled { throw FormatterError.cancelled }
 
             let fileName = file.source.lastPathComponent
             let progress = Double(copiedSize) / Double(max(totalSize, 1))
-            progressHandler(.copying(progress: progress, currentFile: fileName))
+
+            // Update UI on main thread
+            await MainActor.run {
+                progressHandler(.copying(progress: progress, currentFile: fileName))
+            }
 
             // Create directory if needed
             let destDir = file.destination.deletingLastPathComponent()
@@ -388,11 +414,12 @@ final class USBFormatterService {
                 try fileManager.removeItem(at: file.destination)
             }
 
-            let fat32MaxSize: Int64 = 4_294_967_295 // 4GB - 1
             if file.size > fat32MaxSize {
                 // File exceeds FAT32 limit - log warning
-                logHandler("Warning: \(fileName) exceeds 4GB FAT32 limit (\(file.size / 1_073_741_824) GB)", .warning)
-                logHandler("Consider using NTFS or exFAT for large files", .warning)
+                await MainActor.run {
+                    logHandler("Warning: \(fileName) exceeds 4GB FAT32 limit (\(file.size / 1_073_741_824) GB)", .warning)
+                    logHandler("Consider using NTFS or exFAT for large files", .warning)
+                }
             }
 
             try fileManager.copyItem(at: file.source, to: file.destination)
@@ -400,11 +427,18 @@ final class USBFormatterService {
             copiedSize += file.size
 
             if index % 100 == 0 {
-                logHandler("Copied: \(fileName)", .info)
+                await MainActor.run {
+                    logHandler("Copied: \(fileName)", .info)
+                }
             }
+
+            // Yield to allow UI updates
+            await Task.yield()
         }
 
-        progressHandler(.copying(progress: 1.0, currentFile: "Complete"))
+        await MainActor.run {
+            progressHandler(.copying(progress: 1.0, currentFile: "Complete"))
+        }
     }
 
     private func runCommand(_ command: String, arguments: [String]) async throws -> (output: String, error: String, exitCode: Int32) {
