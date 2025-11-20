@@ -495,10 +495,12 @@ final class USBFormatterService {
                     let now = Date()
                     if now.timeIntervalSince(lastProgressUpdate) >= 0.5 {
                         let progress = Double(copiedSize) / Double(max(totalSize, 1))
+                        let sizeString = self.formatBytes(file.size)
+                        let statusText = "\(fileName) (\(sizeString))"
                         
                         // Use Task.detached to avoid inheriting actor context for the update
                         Task.detached { @MainActor in
-                            progressHandler(.copying(progress: progress, currentFile: fileName))
+                            progressHandler(.copying(progress: progress, currentFile: statusText))
                         }
                         lastProgressUpdate = now
                     }
@@ -516,8 +518,11 @@ final class USBFormatterService {
 
             // Report progress with current filename
             let progress = Double(index + 1) / Double(filesToCopy.count)
+            let sizeString = formatBytes(file.size)
+            let statusText = "\(fileName) (\(sizeString))"
+            
             await MainActor.run {
-                progressHandler(.copying(progress: progress, currentFile: fileName))
+                progressHandler(.copying(progress: progress, currentFile: statusText))
                 logHandler("Copied: \(fileName)", .info)
             }
         }
@@ -525,6 +530,15 @@ final class USBFormatterService {
         await MainActor.run {
             progressHandler(.copying(progress: 1.0, currentFile: "Complete"))
         }
+    }
+
+    private func formatBytes(_ bytes: Int64) -> String {
+        let formatter = ByteCountFormatter()
+        formatter.allowedUnits = [.useKB, .useMB, .useGB]
+        formatter.countStyle = .file
+        formatter.includesUnit = true
+        formatter.isAdaptive = true
+        return formatter.string(fromByteCount: bytes)
     }
 
     private func runCommand(_ command: String, arguments: [String]) async throws -> (output: String, error: String, exitCode: Int32) {
