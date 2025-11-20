@@ -457,70 +457,82 @@ final class USBFormatterService {
             }
 
             // Chunked copy
-            do {
-                let sourceHandle = try FileHandle(forReadingFrom: file.source)
-                
-                // Create empty file first
-                fileManager.createFile(atPath: file.destination.path, contents: nil)
-                let destHandle = try FileHandle(forWritingTo: file.destination)
-                
-                defer {
-                    try? sourceHandle.close()
-                    try? destHandle.close()
-                }
-                // Use 256KB chunks to match industry standards (Rufus uses 64-128KB) and ensure responsiveness
-                let bufferSize = 256 * 1024 // 256KB
-                var offset: UInt64 = 0
-                
-                while offset < UInt64(file.size) {
-                    // Check for cancellation
-                    try Task.checkCancellation()
-                    
-                    // Use autoreleasepool to keep memory usage low
-                    let bytesRead = try autoreleasepool { () -> Int in
-                        sourceHandle.seek(toFileOffset: offset)
-                        let data = try sourceHandle.read(upToCount: bufferSize) ?? Data()
-                        
-                        if data.isEmpty { return 0 }
-                        
-                        destHandle.seek(toFileOffset: offset)
-                        try destHandle.write(contentsOf: data)
-                        
-                        return data.count
+            // Use GCD to run on a dedicated background thread, avoiding Swift Concurrency pool contention
+            // This is the most robust way to ensure the Main Thread is never blocked by I/O
+            let initialCopiedSize = copiedSize
+            let bytesCopiedInFile: Int64 = try await withCheckedThrowingContinuation { continuation in
+                DispatchQueue.global(qos: .utility).async { [weak self] in
+                    guard let self = self else {
+                        continuation.resume(throwing: FormatterError.cancelled)
+                        return
                     }
                     
-                    if bytesRead == 0 { break }
-                    
-                    offset += UInt64(bytesRead)
-                    copiedSize += Int64(bytesRead)
-                    
-                    // Update progress periodically (throttled to 0.5s)
-                    let now = Date()
-                    if now.timeIntervalSince(lastProgressUpdate) >= 0.5 {
-                        let progress = Double(copiedSize) / Double(max(totalSize, 1))
-                        let sizeString = self.formatBytes(file.size)
-                        let statusText = "\(fileName) (\(sizeString))"
+                    do {
+                        let sourceHandle = try FileHandle(forReadingFrom: file.source)
                         
-                        // Use Task.detached to avoid inheriting actor context for the update
-                        Task.detached { @MainActor in
-                            progressHandler(.copying(progress: progress, currentFile: statusText))
+                        // Create empty file first
+                        fileManager.createFile(atPath: file.destination.path, contents: nil)
+                        let destHandle = try FileHandle(forWritingTo: file.destination)
+                        
+                        defer {
+                            try? sourceHandle.close()
+                            try? destHandle.close()
                         }
-                        lastProgressUpdate = now
-                    }
-                    
-                    // Yield every chunk (256KB) to ensure UI responsiveness
-                    await Task.yield()
-                    
-                    // Force a small sleep every 10MB (40 chunks) to give Main Thread breathing room
-                    // This is critical for preventing UI freezes on slow devices or high system load
-                    if (offset / UInt64(bufferSize)) % 40 == 0 {
-                        try await Task.sleep(nanoseconds: 10 * 1_000_000) // 10ms
+                        
+                        // Use 256KB chunks
+                        let bufferSize = 256 * 1024
+                        var offset: UInt64 = 0
+                        var fileCopiedSize: Int64 = 0
+                        var lastUpdate = Date()
+                        
+                        while offset < UInt64(file.size) {
+                            if self.isCancelled { throw FormatterError.cancelled }
+                            
+                            let bytesRead = try autoreleasepool { () -> Int in
+                                sourceHandle.seek(toFileOffset: offset)
+                                let data = try sourceHandle.read(upToCount: bufferSize) ?? Data()
+                                
+                                if data.isEmpty { return 0 }
+                                
+                                destHandle.seek(toFileOffset: offset)
+                                try destHandle.write(contentsOf: data)
+                                
+                                return data.count
+                            }
+                            
+                            if bytesRead == 0 { break }
+                            
+                            offset += UInt64(bytesRead)
+                            fileCopiedSize += Int64(bytesRead)
+                            
+                            // Update progress periodically (throttled to 0.5s)
+                            let now = Date()
+                            if now.timeIntervalSince(lastUpdate) >= 0.5 {
+                                let currentTotalCopied = initialCopiedSize + fileCopiedSize
+                                let progress = Double(currentTotalCopied) / Double(max(totalSize, 1))
+                                let sizeString = self.formatBytes(file.size)
+                                let statusText = "\(fileName) (\(sizeString))"
+                                
+                                Task.detached { @MainActor in
+                                    progressHandler(.copying(progress: progress, currentFile: statusText))
+                                }
+                                lastUpdate = now
+                            }
+                            
+                            // Sleep every 10MB to be nice to the system
+                            if (offset / UInt64(bufferSize)) % 40 == 0 {
+                                usleep(10000) // 10ms
+                            }
+                        }
+                        
+                        continuation.resume(returning: fileCopiedSize)
+                    } catch {
+                        continuation.resume(throwing: error)
                     }
                 }
-                
-            } catch {
-                throw FormatterError.copyFailed("Failed to copy \(fileName): \(error.localizedDescription)")
             }
+            
+            copiedSize += bytesCopiedInFile
 
             // Report progress with current filename
             let progress = Double(index + 1) / Double(filesToCopy.count)
