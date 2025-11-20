@@ -405,21 +405,20 @@ final class USBFormatterService {
     }
 
     private func runCommand(_ command: String, arguments: [String]) async throws -> (output: String, error: String, exitCode: Int32) {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: command)
+        process.arguments = arguments
+
+        let outputPipe = Pipe()
+        let errorPipe = Pipe()
+        process.standardOutput = outputPipe
+        process.standardError = errorPipe
+
+        self.currentProcess = process
+
         return try await withCheckedThrowingContinuation { continuation in
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: command)
-            process.arguments = arguments
-
-            let outputPipe = Pipe()
-            let errorPipe = Pipe()
-            process.standardOutput = outputPipe
-            process.standardError = errorPipe
-
-            self.currentProcess = process
-
-            do {
-                try process.run()
-                process.waitUntilExit()
+            process.terminationHandler = { [weak self] process in
+                self?.currentProcess = nil
 
                 let outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
                 let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
@@ -428,11 +427,14 @@ final class USBFormatterService {
                 let error = String(data: errorData, encoding: .utf8) ?? ""
 
                 continuation.resume(returning: (output, error, process.terminationStatus))
-            } catch {
-                continuation.resume(throwing: error)
             }
 
-            self.currentProcess = nil
+            do {
+                try process.run()
+            } catch {
+                self.currentProcess = nil
+                continuation.resume(throwing: error)
+            }
         }
     }
 }
