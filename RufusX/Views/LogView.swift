@@ -69,7 +69,6 @@ struct LogView: View {
             }
         }
         .padding()
-        .frame(minWidth: 600, minHeight: 400)
         .onAppear {
             // Attempt to position window next to main window
             if let window = NSApplication.shared.windows.first(where: { $0.identifier?.rawValue == "log-window" }),
