@@ -506,9 +506,11 @@ final class USBFormatterService {
                 throw FormatterError.copyFailed("Failed to copy \(fileName): \(error.localizedDescription)")
             }
 
-            if index % 10 == 0 { // Log less frequently
+            // Log progress periodically (every 1000 files or 2 seconds)
+            let now = Date()
+            if index % 1000 == 0 || now.timeIntervalSince(lastProgressUpdate) >= 2.0 {
                 await MainActor.run {
-                    logHandler("Copied: \(fileName)", .info)
+                    logHandler("Copied \(index + 1)/\(filesToCopy.count) files...", .debug)
                 }
             }
         }

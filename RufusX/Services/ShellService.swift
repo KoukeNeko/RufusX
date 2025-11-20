@@ -23,47 +23,49 @@ final class ShellService {
     ) async throws -> (output: String, error: String, exitCode: Int32) {
         
         return try await withCheckedThrowingContinuation { continuation in
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: command)
-            process.arguments = arguments
-            
-            let outputPipe = Pipe()
-            let errorPipe = Pipe()
-            let inputPipe = Pipe()
-            
-            process.standardOutput = outputPipe
-            process.standardError = errorPipe
-            process.standardInput = inputPipe
-            
-            do {
-                try process.run()
+            DispatchQueue.global(qos: .userInitiated).async {
+                let process = Process()
+                process.executableURL = URL(fileURLWithPath: command)
+                process.arguments = arguments
                 
-                if let input = input, let inputData = input.data(using: .utf8) {
-                    do {
-                        if #available(macOS 10.15.4, *) {
-                            try inputPipe.fileHandleForWriting.write(contentsOf: inputData)
-                        } else {
-                            inputPipe.fileHandleForWriting.write(inputData)
+                let outputPipe = Pipe()
+                let errorPipe = Pipe()
+                let inputPipe = Pipe()
+                
+                process.standardOutput = outputPipe
+                process.standardError = errorPipe
+                process.standardInput = inputPipe
+                
+                do {
+                    try process.run()
+                    
+                    if let input = input, let inputData = input.data(using: .utf8) {
+                        do {
+                            if #available(macOS 10.15.4, *) {
+                                try inputPipe.fileHandleForWriting.write(contentsOf: inputData)
+                            } else {
+                                inputPipe.fileHandleForWriting.write(inputData)
+                            }
+                            try inputPipe.fileHandleForWriting.close()
+                        } catch {
+                            // Ignore broken pipe errors if process exited early
                         }
-                        try inputPipe.fileHandleForWriting.close()
-                    } catch {
-                        // Ignore broken pipe errors if process exited early
+                    } else {
+                        try? inputPipe.fileHandleForWriting.close()
                     }
-                } else {
-                    try? inputPipe.fileHandleForWriting.close()
+                    
+                    process.waitUntilExit()
+                    
+                    let outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
+                    let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
+                    
+                    let output = String(data: outputData, encoding: .utf8) ?? ""
+                    let error = String(data: errorData, encoding: .utf8) ?? ""
+                    
+                    continuation.resume(returning: (output, error, process.terminationStatus))
+                } catch {
+                    continuation.resume(throwing: error)
                 }
-                
-                process.waitUntilExit()
-                
-                let outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
-                let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
-                
-                let output = String(data: outputData, encoding: .utf8) ?? ""
-                let error = String(data: errorData, encoding: .utf8) ?? ""
-                
-                continuation.resume(returning: (output, error, process.terminationStatus))
-            } catch {
-                continuation.resume(throwing: error)
             }
         }
     }
