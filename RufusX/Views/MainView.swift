@@ -123,7 +123,10 @@ struct DrivePropertiesSection: View {
 
                         HStack {
                             Slider(
-                                value: $viewModel.options.persistentPartitionSizeGB,
+                                value: Binding(
+                                    get: { Double(viewModel.options.persistentPartitionSizeGB) },
+                                    set: { viewModel.options.persistentPartitionSizeGB = Int($0) }
+                                ),
                                 in: 0...32
                             )
 
@@ -359,6 +362,7 @@ struct StatusSection: View {
 
 struct BottomToolbar: View {
     @ObservedObject var viewModel: RufusViewModel
+    @Environment(\.openWindow) var openWindow
 
     var body: some View {
         HStack {

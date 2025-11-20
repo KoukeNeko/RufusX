@@ -168,7 +168,7 @@ final class USBFormatterService {
                 if distroType != .other || options.persistentPartitionSizeGB > 0 {
                     try await persistenceService.createPersistencePartition(
                         diskIdentifier: diskIdentifier,
-                        sizeGB: options.persistentPartitionSizeGB,
+                        sizeGB: Double(options.persistentPartitionSizeGB),
                         distroType: distroType,
                         logHandler: logHandler
                     )

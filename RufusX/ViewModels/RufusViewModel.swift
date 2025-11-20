@@ -147,13 +147,13 @@ final class RufusViewModel: ObservableObject {
 
                 if self.selectedDevice == nil, let firstDevice = devices.first {
                     self.selectedDevice = firstDevice
-                    self.options.selectedDeviceID = firstDevice.id
+
                 }
 
                 if let selected = self.selectedDevice,
                    !devices.contains(where: { $0.id == selected.id }) {
                     self.selectedDevice = devices.first
-                    self.options.selectedDeviceID = devices.first?.id ?? ""
+
                 }
             }
             .store(in: &cancellables)
