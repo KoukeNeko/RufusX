@@ -185,12 +185,22 @@ final class USBFormatterService {
     // MARK: - Private Methods
 
     private func unmountDevice(_ device: USBDevice) async throws {
+        // Check if mounted first to avoid errors
+        let infoResult = try await runCommand("/usr/sbin/diskutil", arguments: ["info", device.mountPoint])
+        if infoResult.exitCode == 0 && infoResult.output.contains("Mounted:                   No") {
+            return // Already unmounted
+        }
+
         let result = try await runCommand(
             "/usr/sbin/diskutil",
             arguments: ["unmountDisk", device.mountPoint]
         )
 
         if result.exitCode != 0 {
+            // If it failed, check if it's because it was already unmounted (race condition)
+            if result.error.contains("not currently mounted") || result.output.contains("not currently mounted") {
+                return
+            }
             throw FormatterError.unmountFailed(result.error)
         }
     }
@@ -566,24 +576,31 @@ extension USBFormatterService {
 
         // Mount ISO read-only to check file sizes
         let mountPoint = try await mountISO(isoPath)
-        defer {
-            Task { try? await unmountISO(mountPoint) }
-        }
+        
+        do {
+            let fileManager = FileManager.default
+            let enumerator = fileManager.enumerator(
+                at: URL(fileURLWithPath: mountPoint),
+                includingPropertiesForKeys: [.fileSizeKey],
+                options: [.skipsHiddenFiles]
+            )
 
-        let fileManager = FileManager.default
-        let enumerator = fileManager.enumerator(
-            at: URL(fileURLWithPath: mountPoint),
-            includingPropertiesForKeys: [.fileSizeKey],
-            options: [.skipsHiddenFiles]
-        )
+            let limit: Int64 = 4_294_967_295 // 4GB - 1
 
-        let limit: Int64 = 4_294_967_295 // 4GB - 1
-
-        while let fileURL = enumerator?.nextObject() as? URL {
-            let resources = try? fileURL.resourceValues(forKeys: [.fileSizeKey])
-            if let size = resources?.fileSize, Int64(size) > limit {
-                throw FormatterError.largeFileOnFAT32(fileURL.lastPathComponent)
+            while let fileURL = enumerator?.nextObject() as? URL {
+                let resources = try? fileURL.resourceValues(forKeys: [.fileSizeKey])
+                if let size = resources?.fileSize, Int64(size) > limit {
+                    throw FormatterError.largeFileOnFAT32(fileURL.lastPathComponent)
+                }
             }
+            
+            // Explicitly unmount on success
+            try await unmountISO(mountPoint)
+            
+        } catch {
+            // Ensure unmount happens even if an error occurs (e.g. large file found)
+            try? await unmountISO(mountPoint)
+            throw error
         }
     }
 
