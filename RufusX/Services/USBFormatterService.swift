@@ -468,8 +468,8 @@ final class USBFormatterService {
                     try? sourceHandle.close()
                     try? destHandle.close()
                 }
-                // Use 1MB chunks to avoid blocking the thread for too long on slow drives
-                let bufferSize = 1024 * 1024 // 1MB
+                // Use 256KB chunks to match industry standards (Rufus uses 64-128KB) and ensure responsiveness
+                let bufferSize = 256 * 1024 // 256KB
                 var offset: UInt64 = 0
                 
                 while offset < UInt64(file.size) {
