@@ -104,7 +104,7 @@ final class USBFormatterService {
 
         // Step 2: Unmount the device
         logHandler("Unmounting device...", .info)
-        try await unmountDevice(device)
+        try await unmountDevice(device, logHandler: logHandler)
 
         if isCancelled { throw FormatterError.cancelled }
 
@@ -145,6 +145,7 @@ final class USBFormatterService {
             try await copyFiles(
                 from: isoMountPoint,
                 to: usbMountPoint,
+                fileSystem: options.fileSystem,
                 progressHandler: progressHandler,
                 logHandler: logHandler
             )
@@ -184,14 +185,14 @@ final class USBFormatterService {
 
     // MARK: - Private Methods
 
-    private func unmountDevice(_ device: USBDevice) async throws {
+    private func unmountDevice(_ device: USBDevice, logHandler: (String, LogLevel) -> Void) async throws {
         // Check if mounted first to avoid errors
         let infoResult = try await runCommand("/usr/sbin/diskutil", arguments: ["info", device.mountPoint])
         if infoResult.exitCode == 0 && infoResult.output.contains("Mounted:                   No") {
             return // Already unmounted
         }
 
-        let result = try await runCommand(
+        var result = try await runCommand(
             "/usr/sbin/diskutil",
             arguments: ["unmountDisk", device.mountPoint]
         )
@@ -201,7 +202,20 @@ final class USBFormatterService {
             if result.error.contains("not currently mounted") || result.output.contains("not currently mounted") {
                 return
             }
-            throw FormatterError.unmountFailed(result.error)
+            
+            // Retry with force
+            logHandler("Standard unmount failed, retrying with force...", .warning)
+            result = try await runCommand(
+                "/usr/sbin/diskutil",
+                arguments: ["unmountDisk", "force", device.mountPoint]
+            )
+            
+            if result.exitCode != 0 {
+                if result.error.contains("not currently mounted") || result.output.contains("not currently mounted") {
+                    return
+                }
+                throw FormatterError.unmountFailed(result.error)
+            }
         }
     }
 
@@ -396,6 +410,7 @@ final class USBFormatterService {
     private func copyFiles(
         from source: String,
         to destination: String,
+        fileSystem: FileSystemType,
         progressHandler: @escaping (OperationStatus) -> Void,
         logHandler: @escaping (String, LogLevel) -> Void
     ) async throws {
@@ -432,8 +447,6 @@ final class USBFormatterService {
 
         var copiedSize: Int64 = 0
         let fat32MaxSize: Int64 = 4_294_967_295 // 4GB - 1
-        let bufferSize = 4 * 1024 * 1024 // 4MB buffer
-        var lastProgressUpdate = Date()
 
         for (index, file) in filesToCopy.enumerated() {
             if isCancelled { throw FormatterError.cancelled }
@@ -445,10 +458,20 @@ final class USBFormatterService {
             try fileManager.createDirectory(at: destDir, withIntermediateDirectories: true)
 
             // Check FAT32 limit
-            if file.size > fat32MaxSize {
-                await MainActor.run {
-                    logHandler("Warning: \(fileName) exceeds 4GB FAT32 limit", .warning)
+            if (fileSystem == .fat32 || fileSystem == .fat) && file.size > fat32MaxSize {
+                // Check for WIM splitting
+                if fileName.lowercased() == "install.wim" || fileName.lowercased() == "install.esd" {
+                    if let wimlibPath = findWimlib() {
+                        try await splitWIM(source: file.source, destination: file.destination, wimlibPath: wimlibPath, logHandler: logHandler)
+                        
+                        // Update progress manually for the split file
+                        copiedSize += file.size
+                        continue
+                    }
                 }
+                
+                // Fallback to ExFAT auto-switch
+                throw FormatterError.largeFileOnFAT32(fileName)
             }
 
             // Remove existing file
@@ -471,7 +494,8 @@ final class USBFormatterService {
                         let sourceHandle = try FileHandle(forReadingFrom: file.source)
                         
                         // Create empty file first
-                        fileManager.createFile(atPath: file.destination.path, contents: nil)
+                        let innerFileManager = FileManager.default
+                        innerFileManager.createFile(atPath: file.destination.path, contents: nil)
                         let destHandle = try FileHandle(forWritingTo: file.destination)
                         
                         defer {
@@ -660,7 +684,7 @@ extension USBFormatterService {
         
         // 1. Unmount device
         logHandler("Unmounting device for DD write...", .info)
-        try await unmountDevice(device)
+        try await unmountDevice(device, logHandler: logHandler)
         
         // 2. Get Raw Disk Identifier (e.g. /dev/rdisk2)
         let diskID = try await getDiskIdentifier(for: device)
@@ -707,5 +731,60 @@ extension USBFormatterService {
         progressHandler(.copying(progress: 1.0, currentFile: "DD Write Complete"))
     }
     
+    // MARK: - WIM Splitting
+    
+    private func findWimlib() -> String? {
+        // 1. Check Bundle
+        if let bundledURL = Bundle.main.url(forResource: "wimlib-imagex", withExtension: nil),
+           FileManager.default.fileExists(atPath: bundledURL.path) {
+            return bundledURL.path
+        }
+        
+        // 2. Check Homebrew (Apple Silicon)
+        if FileManager.default.fileExists(atPath: "/opt/homebrew/bin/wimlib-imagex") {
+            return "/opt/homebrew/bin/wimlib-imagex"
+        }
+        
+        // 3. Check Homebrew (Intel)
+        if FileManager.default.fileExists(atPath: "/usr/local/bin/wimlib-imagex") {
+            return "/usr/local/bin/wimlib-imagex"
+        }
+        
+        // 4. Check System (Unlikely but possible)
+        if FileManager.default.fileExists(atPath: "/usr/bin/wimlib-imagex") {
+            return "/usr/bin/wimlib-imagex"
+        }
+        
+        return nil
+    }
+    
+    private func splitWIM(
+        source: URL,
+        destination: URL,
+        wimlibPath: String,
+        logHandler: @escaping (String, LogLevel) -> Void
+    ) async throws {
+        logHandler("Splitting WIM file: \(source.lastPathComponent)...", .info)
+        
+        // Change extension to .swm for the first part
+        let destSWM = destination.deletingPathExtension().appendingPathExtension("swm")
+        
+        // Split into 3800MB chunks (safe for FAT32)
+        let result = try await runCommand(
+            wimlibPath,
+            arguments: [
+                "split",
+                source.path,
+                destSWM.path,
+                "3800"
+            ]
+        )
+        
+        if result.exitCode != 0 {
+            throw FormatterError.copyFailed("WIM split failed: \(result.error)")
+        }
+        
+        logHandler("WIM split completed successfully", .success)
+    }
 
 }

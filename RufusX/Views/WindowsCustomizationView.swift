@@ -60,10 +60,22 @@ struct WindowsCustomizationView: View {
                     isOn: $options.disableDataCollection
                 )
 
-                Toggle(
-                    "Set a local account using the same name as this user's",
-                    isOn: $options.setLocalAccountName
-                )
+                VStack(alignment: .leading) {
+                    Toggle(
+                        "Set a local account using the same name as this user's",
+                        isOn: $options.setLocalAccountName
+                    )
+                    
+                    if options.setLocalAccountName {
+                        HStack {
+                            Text("Username:")
+                                .foregroundColor(.secondary)
+                            TextField("Username", text: $options.localAccountName)
+                                .textFieldStyle(.roundedBorder)
+                        }
+                        .padding(.leading, 20)
+                    }
+                }
 
                 Toggle(
                     "Set regional options using the same values as this user's",

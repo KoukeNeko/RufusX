@@ -106,7 +106,7 @@ struct WindowsCustomizationOptions {
     var removeOnlineAccountRequirement: Bool = true
     var disableDataCollection: Bool = true
     var setLocalAccountName: Bool = false
-    var localAccountName: String = ""
+    var localAccountName: String = NSUserName()
     var useRegionalSettings: Bool = false
 }
 

@@ -119,6 +119,12 @@ final class RufusViewModel: ObservableObject {
                     self.driveManager.isPaused = false
                     self.driveManager.refreshDevices()
                 }
+            } catch USBFormatterService.FormatterError.largeFileOnFAT32 {
+                await MainActor.run {
+                    self.addLog("Large file detected (>4GB). Switching to ExFAT and retrying...", level: .warning)
+                    self.options.fileSystem = .exfat
+                    self.startOperation()
+                }
             } catch {
                 await MainActor.run {
                     self.status = .failed(message: error.localizedDescription)
