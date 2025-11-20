@@ -8,8 +8,10 @@
 import SwiftUI
 
 struct ContentView: View {
+    @EnvironmentObject var viewModel: RufusViewModel
+
     var body: some View {
-        MainView()
+        MainView(viewModel: viewModel)
     }
 }
 

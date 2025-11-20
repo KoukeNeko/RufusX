@@ -18,42 +18,43 @@ struct LogView: View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Log")
                 .font(.headline)
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 4) {
+                    ForEach(logEntries) { entry in
+                        HStack(alignment: .top, spacing: 8) {
+                            Text(entry.timestamp)
+                                .font(.system(.caption, design: .monospaced))
+                                .foregroundColor(.secondary)
 
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 4) {
-                        ForEach(logEntries) { entry in
-                            HStack(alignment: .top, spacing: 8) {
-                                Text(entry.timestamp)
-                                    .font(.system(.caption, design: .monospaced))
-                                    .foregroundColor(.secondary)
-
-                                Text(entry.message)
-                                    .font(.system(.body, design: .monospaced))
-                                    .foregroundColor(colorForLevel(entry.level))
-                            }
-                            .id(entry.id)
+                            Text(entry.message)
+                                .font(.system(.body, design: .monospaced))
+                                .foregroundColor(colorForLevel(entry.level))
+                                .textSelection(.enabled) // Added text selection
                         }
+                        .id(entry.id)
                     }
-                    .padding(8)
                 }
-                .background(Color(NSColor.textBackgroundColor))
-                .cornerRadius(4)
-                .onChange(of: logEntries.count) { _ in
-                    if autoScroll, let lastId = logEntries.last?.id {
-                        withAnimation {
-                            proxy.scrollTo(lastId, anchor: .bottom)
-                        }
+                .padding(8) // Keep padding inside ScrollView
+            }
+            .onChange(of: logEntries.count) { _ in
+                if autoScroll, let lastId = logEntries.last?.id {
+                    withAnimation {
+                        proxy.scrollTo(lastId, anchor: .bottom)
                     }
                 }
             }
-
-            HStack {
+        }
+        .background(Color(NSColor.textBackgroundColor))
+        .cornerRadius(4) // Keep corner radius
+        .frame(minWidth: 600, minHeight: 400) // Changed frame to minWidth/minHeight
+        .toolbar {
+            ToolbarItem(placement: .automatic) {
                 Toggle("Auto-scroll", isOn: $autoScroll)
-                    .toggleStyle(.checkbox)
-                
-                Spacer()
-                
+                    .toggleStyle(.checkbox) // Apply toggle style here
+            }
+            
+            ToolbarItem(placement: .automatic) {
                 Button("Clear") {
                     logEntries.removeAll()
                 }

@@ -8,7 +8,8 @@
 import SwiftUI
 
 struct MainView: View {
-    @StateObject private var viewModel = RufusViewModel()
+    @ObservedObject var viewModel: RufusViewModel
+    @Environment(\.openWindow) var openWindow
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -31,9 +32,7 @@ struct MainView: View {
         .sheet(isPresented: $viewModel.showDownloadDialog) {
             DownloadISOView(options: $viewModel.options.downloadOptions)
         }
-        .sheet(isPresented: $viewModel.showLogDialog) {
-            LogView(logEntries: $viewModel.logEntries)
-        }
+        // LogView is now a separate window
         .sheet(isPresented: $viewModel.showAboutDialog) {
             AboutView()
         }
@@ -380,7 +379,8 @@ struct BottomToolbar: View {
                 .help("Settings")
 
                 Button(action: {
-                    viewModel.showLogDialog = true
+                    // Open Log Window
+                    openWindow(id: "log-window")
                 }) {
                     Image(systemName: "keyboard")
                 }
