@@ -175,16 +175,31 @@ final class USBFormatterService {
             throw FormatterError.deviceNotFound
         }
 
+        // First get the partition identifier (e.g., disk23s3)
+        var partitionIdentifier: String?
         for line in result.output.components(separatedBy: "\n") {
             if line.contains("Device Identifier:") {
                 let components = line.components(separatedBy: ":")
                 if components.count >= 2 {
-                    return components[1].trimmingCharacters(in: .whitespaces)
+                    partitionIdentifier = components[1].trimmingCharacters(in: .whitespaces)
+                    break
                 }
             }
         }
 
-        throw FormatterError.deviceNotFound
+        guard let partition = partitionIdentifier else {
+            throw FormatterError.deviceNotFound
+        }
+
+        // Extract whole disk identifier (e.g., disk23s3 -> disk23)
+        // Remove the partition suffix (s1, s2, etc.)
+        let wholeDisk = partition.replacingOccurrences(
+            of: "s\\d+$",
+            with: "",
+            options: .regularExpression
+        )
+
+        return wholeDisk
     }
 
     private func formatDevice(
