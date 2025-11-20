@@ -210,7 +210,25 @@ final class USBFormatterService {
     ) async throws {
 
         let fsType = mapFileSystemType(fileSystem)
-        let label = volumeLabel.isEmpty ? "UNTITLED" : volumeLabel
+
+        // FAT32/FAT volume labels are limited to 11 characters
+        // exFAT allows up to 11 characters, APFS allows longer names
+        let maxLabelLength: Int
+        switch fileSystem {
+        case .fat, .fat32:
+            maxLabelLength = 11
+        case .exfat:
+            maxLabelLength = 11
+        default:
+            maxLabelLength = 255
+        }
+
+        var label = volumeLabel.isEmpty ? "UNTITLED" : volumeLabel
+        if label.count > maxLabelLength {
+            label = String(label.prefix(maxLabelLength))
+        }
+        // Remove invalid characters for FAT/exFAT
+        label = label.replacingOccurrences(of: "[^A-Za-z0-9_\\-]", with: "_", options: .regularExpression)
 
         progressHandler(.formatting(progress: 0.3))
 
