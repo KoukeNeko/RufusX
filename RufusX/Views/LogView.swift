@@ -12,31 +12,48 @@ struct LogView: View {
     @Binding var logEntries: [LogEntry]
     @Environment(\.dismiss) private var dismiss
 
+    @State private var autoScroll: Bool = true
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Log")
                 .font(.headline)
 
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 4) {
-                    ForEach(logEntries) { entry in
-                        HStack(alignment: .top, spacing: 8) {
-                            Text(entry.timestamp)
-                                .font(.system(.caption, design: .monospaced))
-                                .foregroundColor(.secondary)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 4) {
+                        ForEach(logEntries) { entry in
+                            HStack(alignment: .top, spacing: 8) {
+                                Text(entry.timestamp)
+                                    .font(.system(.caption, design: .monospaced))
+                                    .foregroundColor(.secondary)
 
-                            Text(entry.message)
-                                .font(.system(.body, design: .monospaced))
-                                .foregroundColor(colorForLevel(entry.level))
+                                Text(entry.message)
+                                    .font(.system(.body, design: .monospaced))
+                                    .foregroundColor(colorForLevel(entry.level))
+                            }
+                            .id(entry.id)
+                        }
+                    }
+                    .padding(8)
+                }
+                .background(Color(NSColor.textBackgroundColor))
+                .cornerRadius(4)
+                .onChange(of: logEntries.count) { _ in
+                    if autoScroll, let lastId = logEntries.last?.id {
+                        withAnimation {
+                            proxy.scrollTo(lastId, anchor: .bottom)
                         }
                     }
                 }
-                .padding(8)
             }
-            .background(Color(NSColor.textBackgroundColor))
-            .cornerRadius(4)
 
             HStack {
+                Toggle("Auto-scroll", isOn: $autoScroll)
+                    .toggleStyle(.checkbox)
+                
+                Spacer()
+                
                 Button("Clear") {
                     logEntries.removeAll()
                 }
@@ -44,8 +61,6 @@ struct LogView: View {
                 Button("Save") {
                     saveLog()
                 }
-
-                Spacer()
 
                 Button("Close") {
                     dismiss()
