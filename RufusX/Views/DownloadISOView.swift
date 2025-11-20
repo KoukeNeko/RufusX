@@ -59,20 +59,23 @@ struct DownloadISOView: View {
             Spacer()
 
             HStack {
+                Spacer()
+
                 Button("Download") {
                     // Implement download logic
                     dismiss()
                 }
                 .keyboardShortcut(.defaultAction)
+                .buttonStyle(.borderedProminent)
 
                 Button("Back") {
                     dismiss()
                 }
+                .buttonStyle(.bordered)
             }
-            .frame(maxWidth: .infinity)
         }
         .padding()
-        .frame(width: 400, height: 400)
+        .frame(width: 420, height: 420)
         .onAppear {
             if options.version.isEmpty {
                 options.version = versions[0]

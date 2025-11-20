@@ -18,7 +18,8 @@ struct MainView: View {
             BottomToolbar(viewModel: viewModel)
         }
         .padding()
-        .frame(width: 460, height: 680)
+        .frame(minWidth: 480, minHeight: 720)
+        .frame(width: 500, height: 780)
         .sheet(isPresented: $viewModel.showWindowsCustomization) {
             WindowsCustomizationView(options: $viewModel.options.windowsCustomization)
         }
