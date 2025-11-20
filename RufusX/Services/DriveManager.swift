@@ -82,41 +82,55 @@ final class DriveManager: ObservableObject {
     }
 
     private func fetchRemovableDevices() -> [USBDevice] {
-        var devices: [USBDevice] = []
-
-        let fileManager = FileManager.default
-        let volumesPath = "/Volumes"
-
-        guard let volumeURLs = try? fileManager.contentsOfDirectory(
-            at: URL(fileURLWithPath: volumesPath),
-            includingPropertiesForKeys: [.volumeIsRemovableKey, .volumeTotalCapacityKey, .volumeNameKey],
-            options: [.skipsHiddenFiles]
-        ) else {
-            return devices
+        // Use diskutil to get external physical disks (filters out virtual drives/ISOs)
+        guard let listOutput = try? runDiskUtil(arguments: ["list", "-plist", "external", "physical"]),
+              let listData = listOutput.data(using: .utf8),
+              let listPlist = try? PropertyListSerialization.propertyList(from: listData, options: [], format: nil) as? [String: Any],
+              let wholeDisks = listPlist["WholeDisks"] as? [String] else {
+            return []
         }
 
-        for volumeURL in volumeURLs {
-            guard let resourceValues = try? volumeURL.resourceValues(
-                forKeys: [.volumeIsRemovableKey, .volumeTotalCapacityKey, .volumeNameKey]
-            ) else {
+        var devices: [USBDevice] = []
+
+        for diskID in wholeDisks {
+            // Get detailed info for each disk
+            guard let infoOutput = try? runDiskUtil(arguments: ["info", "-plist", diskID]),
+                  let infoData = infoOutput.data(using: .utf8),
+                  let infoPlist = try? PropertyListSerialization.propertyList(from: infoData, options: [], format: nil) as? [String: Any] else {
                 continue
             }
 
-            let isRemovable = resourceValues.volumeIsRemovable ?? false
-
-            guard isRemovable else { continue }
-
-            let volumeName = resourceValues.volumeName ?? volumeURL.lastPathComponent
-            let capacity = Int64(resourceValues.volumeTotalCapacity ?? 0)
-
-            let diskName = extractDiskIdentifier(from: volumeURL.path)
+            let deviceIdentifier = infoPlist["DeviceIdentifier"] as? String ?? diskID
+            let mediaName = infoPlist["MediaName"] as? String ?? "Unknown Device"
+            let totalSize = infoPlist["TotalSize"] as? Int64 ?? 0
+            let isRemovable = infoPlist["Removable"] as? Bool ?? true // Assume removable if in external list
+            
+            // Try to find a volume name from partitions if available
+            var volumeName = ""
+            if let partitions = listPlist["AllDisksAndPartitions"] as? [[String: Any]] {
+                if let diskNode = partitions.first(where: { ($0["DeviceIdentifier"] as? String) == diskID }),
+                   let subPartitions = diskNode["Partitions"] as? [[String: Any]] {
+                    // Find first partition with a volume name
+                    for part in subPartitions {
+                        if let vName = part["VolumeName"] as? String, !vName.isEmpty {
+                            volumeName = vName
+                            break
+                        }
+                    }
+                }
+            }
+            
+            // If no volume name found, use media name or generic
+            if volumeName.isEmpty {
+                volumeName = mediaName
+            }
 
             let device = USBDevice(
-                id: volumeURL.path,
-                name: diskName,
+                id: deviceIdentifier,
+                name: mediaName,
                 volumeName: volumeName,
-                capacityBytes: capacity,
-                mountPoint: volumeURL.path,
+                capacityBytes: totalSize,
+                mountPoint: "/dev/\(deviceIdentifier)", // Use raw device path
                 isRemovable: isRemovable
             )
 
@@ -126,34 +140,19 @@ final class DriveManager: ObservableObject {
         return devices.sorted { $0.name < $1.name }
     }
 
-    private func extractDiskIdentifier(from mountPoint: String) -> String {
+    private func runDiskUtil(arguments: [String]) throws -> String {
         let task = Process()
         task.executableURL = URL(fileURLWithPath: "/usr/sbin/diskutil")
-        task.arguments = ["info", mountPoint]
+        task.arguments = arguments
 
         let pipe = Pipe()
         task.standardOutput = pipe
         task.standardError = FileHandle.nullDevice
 
-        do {
-            try task.run()
-            task.waitUntilExit()
+        try task.run()
+        task.waitUntilExit()
 
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            let output = String(data: data, encoding: .utf8) ?? ""
-
-            for line in output.components(separatedBy: "\n") {
-                if line.contains("Device Identifier:") {
-                    let components = line.components(separatedBy: ":")
-                    if components.count >= 2 {
-                        return components[1].trimmingCharacters(in: .whitespaces)
-                    }
-                }
-            }
-        } catch {
-            // Fall back to mount point name
-        }
-
-        return URL(fileURLWithPath: mountPoint).lastPathComponent
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        return String(data: data, encoding: .utf8) ?? ""
     }
 }
