@@ -90,7 +90,7 @@ final class USBFormatterService {
         // Pre-flight Check: FAT32 > 4GB
         if let isoPath = options.isoFilePath {
             logHandler("Checking ISO requirements...", .info)
-            try await checkISORequirements(isoPath: isoPath, fileSystem: options.fileSystem)
+            try await checkISORequirements(isoPath: isoPath, fileSystem: options.fileSystem, logHandler: logHandler)
         }
 
         // Step 1: Get disk identifier BEFORE unmounting
@@ -322,7 +322,7 @@ final class USBFormatterService {
     private func mountISO(_ isoPath: URL) async throws -> String {
         let result = try await runCommand(
             "/usr/bin/hdiutil",
-            arguments: ["attach", isoPath.path, "-nobrowse", "-readonly"]
+            arguments: ["attach", isoPath.path, "-nobrowse", "-readonly", "-noverify", "-noautoopen"]
         )
 
         guard result.exitCode == 0 else {
@@ -612,11 +612,13 @@ extension USBFormatterService {
 
     // MARK: - Pre-flight Checks
 
-    private func checkISORequirements(isoPath: URL, fileSystem: FileSystemType) async throws {
+    private func checkISORequirements(isoPath: URL, fileSystem: FileSystemType, logHandler: (String, LogLevel) -> Void) async throws {
         guard fileSystem == .fat32 || fileSystem == .fat else { return }
 
         // Mount ISO read-only to check file sizes
+        logHandler("Mounting ISO to check file sizes...", .debug)
         let mountPoint = try await mountISO(isoPath)
+        logHandler("ISO mounted at: \(mountPoint)", .debug)
         
         do {
             let fileManager = FileManager.default
@@ -634,6 +636,8 @@ extension USBFormatterService {
                     throw FormatterError.largeFileOnFAT32(fileURL.lastPathComponent)
                 }
             }
+            
+            logHandler("ISO file size check passed. Unmounting...", .debug)
             
             // Explicitly unmount on success
             try await unmountISO(mountPoint)
