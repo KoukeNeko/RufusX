@@ -152,22 +152,22 @@ struct AdvancedFormatOptions {
 
 struct RufusOptions {
     // Drive Properties
-    var selectedDeviceID: String
-    var isoFilePath: URL?
-    var persistentPartitionSizeGB: Double
-    var partitionScheme: PartitionScheme
-    var targetSystem: TargetSystem
-    var advancedDriveProperties: AdvancedDriveProperties
+    var selectedDeviceID: String = ""
+    var isoFilePath: URL? = nil
+    var persistentPartitionSizeGB: Double = 0
+    var partitionScheme: PartitionScheme = .mbr
+    var targetSystem: TargetSystem = .biosOrUefi
+    var advancedDriveProperties: AdvancedDriveProperties = AdvancedDriveProperties()
 
     // Format Options
-    var volumeLabel: String
-    var fileSystem: FileSystemType
-    var clusterSize: ClusterSize
-    var advancedFormatOptions: AdvancedFormatOptions
+    var volumeLabel: String = "RufusX"
+    var fileSystem: FileSystemType = .fat32
+    var clusterSize: ClusterSize = .auto
+    var advancedFormatOptions: AdvancedFormatOptions = AdvancedFormatOptions()
 
     // Image Options (for Windows ISO)
-    var imageOption: ImageOption
-    var windowsCustomization: WindowsCustomizationOptions
+    var imageOption: ImageOption = .standardInstallation
+    var windowsCustomization: WindowsCustomizationOptions = WindowsCustomizationOptions()
 
     // Download Options
     var downloadOptions = ISODownloadOptions()

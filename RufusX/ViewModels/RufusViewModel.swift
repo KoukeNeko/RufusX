@@ -86,19 +86,19 @@ final class RufusViewModel: ObservableObject {
         driveManager.isPaused = true
         addLog("Starting operation on \(device.displayName)", level: .info)
 
-        Task {
+        Task.detached(priority: .userInitiated) { [options, formatterService] in
             do {
                 try await formatterService.formatUSBDrive(
                     device: device,
                     options: options,
-                    progressHandler: { [weak self] newStatus in
+                    progressHandler: { newStatus in
                         Task { @MainActor in
-                            self?.status = newStatus
+                            self.status = newStatus
                         }
                     },
-                    logHandler: { [weak self] message, level in
+                    logHandler: { message, level in
                         Task { @MainActor in
-                            self?.addLog(message, level: level)
+                            self.addLog(message, level: level)
                         }
                     }
                 )

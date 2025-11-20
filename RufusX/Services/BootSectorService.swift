@@ -454,9 +454,24 @@ final class BootSectorService {
             do {
                 try process.run()
 
-                if let input = input {
-                    inputPipe.fileHandleForWriting.write(input.data(using: .utf8)!)
-                    inputPipe.fileHandleForWriting.closeFile()
+                if let input = input, let inputData = input.data(using: .utf8) {
+                    // Handle input writing safely
+                    do {
+                        if #available(macOS 10.15.4, *) {
+                            try inputPipe.fileHandleForWriting.write(contentsOf: inputData)
+                        } else {
+                            // Fallback for older macOS, but riskier. 
+                            // Ideally we should use the new API.
+                            inputPipe.fileHandleForWriting.write(inputData)
+                        }
+                        try inputPipe.fileHandleForWriting.close()
+                    } catch {
+                        // Ignore broken pipe errors if process exited early
+                        // But log it if needed (continuation handles the result)
+                    }
+                } else {
+                    // Close input pipe if no input to signal EOF
+                    try? inputPipe.fileHandleForWriting.close()
                 }
 
                 process.waitUntilExit()
