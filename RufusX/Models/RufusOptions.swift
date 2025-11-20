@@ -267,8 +267,8 @@ enum OperationStatus: Equatable {
             return "Preparing..."
         case .formatting(let progress):
             return "Formatting... \(Int(progress * 100))%"
-        case .copying(let progress, _):
-            return "Copying files... \(Int(progress * 100))%"
+        case .copying(let progress, let currentFile):
+            return "Copying: \(currentFile) (\(Int(progress * 100))%)"
         case .verifying(let progress):
             return "Verifying... \(Int(progress * 100))%"
         case .completed:

@@ -38,6 +38,9 @@ final class RufusViewModel: ObservableObject {
 
     private var cancellables = Set<AnyCancellable>()
     private var timer: Timer?
+    
+    // Log buffering
+    private var logBufferHelper: LogBuffer?
 
     // MARK: - Computed Properties
 
@@ -59,6 +62,12 @@ final class RufusViewModel: ObservableObject {
 
     init() {
         setupBindings()
+        // Initialize log buffer
+        logBufferHelper = LogBuffer { [weak self] entries in
+            Task { @MainActor [weak self] in
+                self?.logEntries.append(contentsOf: entries)
+            }
+        }
     }
 
     // MARK: - Public Methods
@@ -130,7 +139,7 @@ final class RufusViewModel: ObservableObject {
     }
 
     func addLog(_ message: String, level: LogLevel = .info) {
-        logEntries.append(LogEntry(message: message, level: level))
+        logBufferHelper?.add(LogEntry(message: message, level: level))
     }
 
     func refreshDevices() {
@@ -203,5 +212,46 @@ final class RufusViewModel: ObservableObject {
     private func stopTimer() {
         timer?.invalidate()
         timer = nil
+    }
+    
+    // MARK: - Log Buffering Helper
+}
+
+// Helper class for log buffering
+private class LogBuffer {
+    private var buffer: [LogEntry] = []
+    private let queue = DispatchQueue(label: "com.rufusx.logbuffer", qos: .userInitiated)
+    private var timer: DispatchSourceTimer?
+    private let onFlush: ([LogEntry]) -> Void
+    
+    init(onFlush: @escaping ([LogEntry]) -> Void) {
+        self.onFlush = onFlush
+        startTimer()
+    }
+    
+    deinit {
+        timer?.cancel()
+    }
+    
+    func add(_ entry: LogEntry) {
+        queue.async { [weak self] in
+            self?.buffer.append(entry)
+        }
+    }
+    
+    private func startTimer() {
+        timer = DispatchSource.makeTimerSource(queue: queue)
+        timer?.schedule(deadline: .now() + 0.25, repeating: 0.25)
+        timer?.setEventHandler { [weak self] in
+            self?.flush()
+        }
+        timer?.resume()
+    }
+    
+    private func flush() {
+        guard !buffer.isEmpty else { return }
+        let entries = buffer
+        buffer.removeAll()
+        onFlush(entries)
     }
 }
