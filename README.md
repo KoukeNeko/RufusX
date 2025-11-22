@@ -2,6 +2,9 @@
 
 RufusX is a native macOS application designed to create bootable USB drives from ISO images, inspired by the popular Windows tool Rufus. It brings powerful features like Windows installation customization, Linux persistence, and robust drive formatting to the Mac ecosystem.
 
+<img width="962" height="798" alt="image" src="https://github.com/user-attachments/assets/b32f4a30-19c9-4598-930d-2bd93b2a08e5" />
+
+
 ## Features
 
 ### 🚀 Bootable USB Creation
@@ -72,4 +75,4 @@ Customize your Windows installation media directly from the app:
 
 ## License
 
-MIT License
+GPL-3.0 license
