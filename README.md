@@ -37,9 +37,9 @@ Customize your Windows installation media directly from the app:
 
 ## Tested Configurations
 
-| OS                     | Architecture | Partition Scheme | Target System  | File System | Status     | Notes                              |
-| :--------------------- | :----------- | :--------------- | :------------- | :---------- | :--------- | :--------------------------------- |
-| **Windows 11 (25H2) ** | x64          | GPT              | UEFI (non CSM) | exFAT       | ✅ Success | Booted and installed successfully. |
+| OS                    | Architecture | Partition Scheme | Target System  | File System | Status     | Notes                              |
+| :-------------------- | :----------- | :--------------- | :------------- | :---------- | :--------- | :--------------------------------- |
+| **Windows 11 (25H2)** | x64          | GPT              | UEFI (non CSM) | exFAT       | ✅ Success | Booted and installed successfully. |
 
 ## Installation
 
