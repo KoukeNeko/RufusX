@@ -4,7 +4,6 @@ RufusX is a native macOS application designed to create bootable USB drives from
 
 <img width="962" height="798" alt="image" src="https://github.com/user-attachments/assets/b32f4a30-19c9-4598-930d-2bd93b2a08e5" />
 
-
 ## Features
 
 ### 🚀 Bootable USB Creation
@@ -35,6 +34,12 @@ Customize your Windows installation media directly from the app:
 - **Force Unmount**: Intelligent retry mechanism to handle stubborn mounted drives (`diskutil unmountDisk force`).
 - **Admin Privileges**: Securely handles `sudo` operations for low-level disk writing (`dd`, `fdisk`, `mkfs`).
 - **Validation**: Built-in checksum calculation (MD5, SHA1, SHA256) to verify ISO integrity.
+
+## Tested Configurations
+
+| OS             | Architecture | Partition Scheme | Target System  | File System | Status     | Notes                              |
+| :------------- | :----------- | :--------------- | :------------- | :---------- | :--------- | :--------------------------------- |
+| **Windows 11** | x64 (25H2)   | GPT              | UEFI (non CSM) | exFAT       | ✅ Success | Booted and installed successfully. |
 
 ## Installation
 
