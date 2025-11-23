@@ -818,7 +818,7 @@ extension USBFormatterService {
         let destSWM = destination.deletingPathExtension().appendingPathExtension("swm")
         try cleanupExistingSplitParts(baseSWM: destSWM, logHandler: logHandler)
         
-        try await withCheckedThrowingContinuation { continuation in
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             DispatchQueue.global(qos: .userInitiated).async { [weak self] in
                 guard let self = self else {
                     continuation.resume(throwing: FormatterError.cancelled)
