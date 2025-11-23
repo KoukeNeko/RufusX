@@ -798,26 +798,115 @@ extension USBFormatterService {
         logHandler: @escaping (String, LogLevel) -> Void
     ) async throws {
         logHandler("Splitting WIM file: \(source.lastPathComponent)...", .info)
+        logHandler("This may take several minutes depending on USB speed.", .info)
         
         // Change extension to .swm for the first part
         let destSWM = destination.deletingPathExtension().appendingPathExtension("swm")
+        try cleanupExistingSplitParts(baseSWM: destSWM, logHandler: logHandler)
         
         // Split into 3800MB chunks (safe for FAT32)
-        let result = try await runCommand(
-            wimlibPath,
-            arguments: [
-                "split",
-                source.path,
-                destSWM.path,
-                "3800"
-            ]
-        )
-        
-        if result.exitCode != 0 {
-            throw FormatterError.copyFailed("WIM split failed: \(result.error)")
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: wimlibPath)
+        process.arguments = [
+            "split",
+            source.path,
+            destSWM.path,
+            "3800"
+        ]
+
+        let outputPipe = Pipe()
+        process.standardOutput = outputPipe
+        process.standardError = outputPipe
+        currentProcess = process
+
+        let bufferQueue = DispatchQueue(label: "com.rufusx.wimlib-output")
+        var aggregatedOutput = ""
+        var partialLine = ""
+
+        func emitLine(_ line: String) {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return }
+            aggregatedOutput.append(trimmed + "\n")
+            let level: LogLevel = trimmed.contains("%") ? .info : .debug
+            logHandler("wimlib: \(trimmed)", level)
         }
-        
+
+        func enqueueChunk(_ chunk: String) {
+            let normalized = chunk.replacingOccurrences(of: "\r", with: "\n")
+            partialLine += normalized
+            while let range = partialLine.range(of: "\n") {
+                let line = String(partialLine[..<range.lowerBound])
+                partialLine = String(partialLine[range.upperBound...])
+                emitLine(line)
+            }
+        }
+
+        let readHandle = outputPipe.fileHandleForReading
+        readHandle.readabilityHandler = { handle in
+            let data = handle.availableData
+            guard !data.isEmpty, let chunk = String(data: data, encoding: .utf8) else { return }
+            bufferQueue.async {
+                enqueueChunk(chunk)
+            }
+        }
+
+        do {
+            try process.run()
+        } catch {
+            readHandle.readabilityHandler = nil
+            currentProcess = nil
+            throw error
+        }
+
+        process.waitUntilExit()
+        readHandle.readabilityHandler = nil
+
+        bufferQueue.sync {
+            let remainingData = readHandle.readDataToEndOfFile()
+            if let chunk = String(data: remainingData, encoding: .utf8) {
+                enqueueChunk(chunk)
+            }
+            if !partialLine.isEmpty {
+                emitLine(partialLine)
+                partialLine = ""
+            }
+        }
+        readHandle.closeFile()
+
+        currentProcess = nil
+
+        if isCancelled {
+            throw FormatterError.cancelled
+        }
+
+        if process.terminationStatus != 0 {
+            let errorOutput = aggregatedOutput.trimmingCharacters(in: .whitespacesAndNewlines)
+            throw FormatterError.copyFailed("WIM split failed: \(errorOutput.isEmpty ? "Unknown error" : errorOutput)")
+        }
+
         logHandler("WIM split completed successfully", .success)
+    }
+
+    private func cleanupExistingSplitParts(baseSWM: URL, logHandler: @escaping (String, LogLevel) -> Void) throws {
+        let fileManager = FileManager.default
+        let directoryURL = baseSWM.deletingLastPathComponent()
+        let baseName = baseSWM.deletingPathExtension().lastPathComponent
+        guard fileManager.fileExists(atPath: directoryURL.path) else { return }
+        let contents = try fileManager.contentsOfDirectory(at: directoryURL, includingPropertiesForKeys: nil)
+        for url in contents {
+            guard url.pathExtension.lowercased() == "swm" else { continue }
+            let name = url.deletingPathExtension().lastPathComponent
+            guard name.hasPrefix(baseName) else { continue }
+            let suffix = name.dropFirst(baseName.count)
+            let shouldRemove = suffix.isEmpty || Int(suffix) != nil
+            guard shouldRemove else { continue }
+            do {
+                try fileManager.removeItem(at: url)
+                logHandler("Removed leftover split part: \(url.lastPathComponent)", .debug)
+            } catch {
+                logHandler("Failed to remove leftover split part (\(url.lastPathComponent)): \(error.localizedDescription)", .warning)
+            }
+        }
     }
 
 }
