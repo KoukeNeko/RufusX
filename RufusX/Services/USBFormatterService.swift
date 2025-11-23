@@ -462,10 +462,20 @@ final class USBFormatterService {
                 // Check for WIM splitting
                 if fileName.lowercased() == "install.wim" || fileName.lowercased() == "install.esd" {
                     if let wimlibPath = findWimlib() {
-                        try await splitWIM(source: file.source, destination: file.destination, wimlibPath: wimlibPath, logHandler: logHandler)
+                        try await splitWIM(
+                            source: file.source,
+                            destination: file.destination,
+                            wimlibPath: wimlibPath,
+                            logHandler: logHandler,
+                            progressHandler: progressHandler
+                        )
                         
                         // Update progress manually for the split file
                         copiedSize += file.size
+                        let overallProgress = Double(copiedSize) / Double(max(totalSize, 1))
+                        await MainActor.run {
+                            progressHandler(.copying(progress: overallProgress, currentFile: "Splitting completed for \(fileName)"))
+                        }
                         continue
                     }
                 }
@@ -795,96 +805,128 @@ extension USBFormatterService {
         source: URL,
         destination: URL,
         wimlibPath: String,
-        logHandler: @escaping (String, LogLevel) -> Void
+        logHandler: @escaping (String, LogLevel) -> Void,
+        progressHandler: @escaping (OperationStatus) -> Void
     ) async throws {
         logHandler("Splitting WIM file: \(source.lastPathComponent)...", .info)
         logHandler("This may take several minutes depending on USB speed.", .info)
+        await MainActor.run {
+            progressHandler(.copying(progress: 0.0, currentFile: "Splitting \(source.lastPathComponent)..."))
+        }
         
         // Change extension to .swm for the first part
         let destSWM = destination.deletingPathExtension().appendingPathExtension("swm")
         try cleanupExistingSplitParts(baseSWM: destSWM, logHandler: logHandler)
         
-        // Split into 3800MB chunks (safe for FAT32)
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: wimlibPath)
-        process.arguments = [
-            "split",
-            source.path,
-            destSWM.path,
-            "3800"
-        ]
-
-        let outputPipe = Pipe()
-        process.standardOutput = outputPipe
-        process.standardError = outputPipe
-        currentProcess = process
-
-        let bufferQueue = DispatchQueue(label: "com.rufusx.wimlib-output")
-        var aggregatedOutput = ""
-        var partialLine = ""
-
-        func emitLine(_ line: String) {
-            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else { return }
-            aggregatedOutput.append(trimmed + "\n")
-            let level: LogLevel = trimmed.contains("%") ? .info : .debug
-            logHandler("wimlib: \(trimmed)", level)
-        }
-
-        func enqueueChunk(_ chunk: String) {
-            let normalized = chunk.replacingOccurrences(of: "\r", with: "\n")
-            partialLine += normalized
-            while let range = partialLine.range(of: "\n") {
-                let line = String(partialLine[..<range.lowerBound])
-                partialLine = String(partialLine[range.upperBound...])
-                emitLine(line)
+        try await withCheckedThrowingContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                guard let self = self else {
+                    continuation.resume(throwing: FormatterError.cancelled)
+                    return
+                }
+                
+                let process = Process()
+                process.executableURL = URL(fileURLWithPath: wimlibPath)
+                process.arguments = [
+                    "split",
+                    source.path,
+                    destSWM.path,
+                    "3800"
+                ]
+                
+                let outputPipe = Pipe()
+                process.standardOutput = outputPipe
+                process.standardError = outputPipe
+                self.currentProcess = process
+                
+                let bufferQueue = DispatchQueue(label: "com.rufusx.wimlib-output")
+                var aggregatedOutput = ""
+                var partialLine = ""
+                var finished = false
+                let fileName = source.lastPathComponent
+                
+                func reportProgress(percent: Int) {
+                    let clamped = max(0, min(percent, 100))
+                    Task { @MainActor in
+                        let progressValue = Double(clamped) / 100.0
+                        progressHandler(.copying(progress: progressValue, currentFile: "Splitting \(fileName) (\(clamped)%)"))
+                    }
+                }
+                
+                func emitLine(_ line: String) {
+                    let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !trimmed.isEmpty else { return }
+                    aggregatedOutput.append(trimmed + "\n")
+                    if let match = trimmed.range(of: "(\\d{1,3})%", options: .regularExpression) {
+                        let percentString = trimmed[match].replacingOccurrences(of: "%", with: "")
+                        if let percent = Int(percentString) {
+                            reportProgress(percent: percent)
+                        }
+                    }
+                    let level: LogLevel = trimmed.contains("%") ? .info : .debug
+                    logHandler("wimlib: \(trimmed)", level)
+                }
+                
+                func enqueueChunk(_ chunk: String) {
+                    let normalized = chunk.replacingOccurrences(of: "\r", with: "\n")
+                    partialLine += normalized
+                    while let range = partialLine.range(of: "\n") {
+                        let line = String(partialLine[..<range.lowerBound])
+                        partialLine = String(partialLine[range.upperBound...])
+                        emitLine(line)
+                    }
+                }
+                
+                let readHandle = outputPipe.fileHandleForReading
+                readHandle.readabilityHandler = { handle in
+                    let data = handle.availableData
+                    guard !data.isEmpty, let chunk = String(data: data, encoding: .utf8) else { return }
+                    bufferQueue.async {
+                        enqueueChunk(chunk)
+                    }
+                }
+                
+                func finish(_ result: Result<Void, Error>) {
+                    guard !finished else { return }
+                    finished = true
+                    readHandle.readabilityHandler = nil
+                    bufferQueue.sync {
+                        let remainingData = readHandle.readDataToEndOfFile()
+                        if let chunk = String(data: remainingData, encoding: .utf8) {
+                            enqueueChunk(chunk)
+                        }
+                        if !partialLine.isEmpty {
+                            emitLine(partialLine)
+                            partialLine = ""
+                        }
+                    }
+                    try? readHandle.close()
+                    self.currentProcess = nil
+                    continuation.resume(with: result)
+                }
+                
+                process.terminationHandler = { proc in
+                    if self.isCancelled {
+                        finish(.failure(FormatterError.cancelled))
+                        return
+                    }
+                    if proc.terminationStatus == 0 {
+                        reportProgress(percent: 100)
+                        logHandler("WIM split completed successfully", .success)
+                        finish(.success(()))
+                    } else {
+                        let errorOutput = aggregatedOutput.trimmingCharacters(in: .whitespacesAndNewlines)
+                        finish(.failure(FormatterError.copyFailed("WIM split failed: \(errorOutput.isEmpty ? "Unknown error" : errorOutput)")))
+                    }
+                }
+                
+                do {
+                    try process.run()
+                } catch {
+                    finish(.failure(error))
+                }
             }
         }
-
-        let readHandle = outputPipe.fileHandleForReading
-        readHandle.readabilityHandler = { handle in
-            let data = handle.availableData
-            guard !data.isEmpty, let chunk = String(data: data, encoding: .utf8) else { return }
-            bufferQueue.async {
-                enqueueChunk(chunk)
-            }
-        }
-
-        do {
-            try process.run()
-        } catch {
-            readHandle.readabilityHandler = nil
-            currentProcess = nil
-            throw error
-        }
-
-        process.waitUntilExit()
-        readHandle.readabilityHandler = nil
-
-        bufferQueue.sync {
-            let remainingData = readHandle.readDataToEndOfFile()
-            if let chunk = String(data: remainingData, encoding: .utf8) {
-                enqueueChunk(chunk)
-            }
-            if !partialLine.isEmpty {
-                emitLine(partialLine)
-                partialLine = ""
-            }
-        }
-        readHandle.closeFile()
-
-        currentProcess = nil
-
-        if isCancelled {
-            throw FormatterError.cancelled
-        }
-
-        if process.terminationStatus != 0 {
-            let errorOutput = aggregatedOutput.trimmingCharacters(in: .whitespacesAndNewlines)
-            throw FormatterError.copyFailed("WIM split failed: \(errorOutput.isEmpty ? "Unknown error" : errorOutput)")
-        }
-
-        logHandler("WIM split completed successfully", .success)
     }
 
     private func cleanupExistingSplitParts(baseSWM: URL, logHandler: @escaping (String, LogLevel) -> Void) throws {
