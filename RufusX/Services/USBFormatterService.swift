@@ -503,8 +503,8 @@ final class USBFormatterService {
                             try? destHandle.close()
                         }
                         
-                        // Use 256KB chunks
-                        let bufferSize = 256 * 1024
+                        // Use 4MB chunks
+                        let bufferSize = 4 * 1024 * 1024
                         var offset: UInt64 = 0
                         var fileCopiedSize: Int64 = 0
                         var lastUpdate = Date()
@@ -513,12 +513,12 @@ final class USBFormatterService {
                             if self.isCancelled { throw FormatterError.cancelled }
                             
                             let bytesRead = try autoreleasepool { () -> Int in
-                                sourceHandle.seek(toFileOffset: offset)
+                                // FileHandle automatically advances the file pointer, so explicit seek is not needed
+                                // and can actually hurt performance by forcing buffer flushes.
                                 let data = try sourceHandle.read(upToCount: bufferSize) ?? Data()
                                 
                                 if data.isEmpty { return 0 }
                                 
-                                destHandle.seek(toFileOffset: offset)
                                 try destHandle.write(contentsOf: data)
                                 
                                 return data.count
@@ -541,11 +541,6 @@ final class USBFormatterService {
                                     progressHandler(.copying(progress: progress, currentFile: statusText))
                                 }
                                 lastUpdate = now
-                            }
-                            
-                            // Sleep every 10MB to be nice to the system
-                            if (offset / UInt64(bufferSize)) % 40 == 0 {
-                                usleep(10000) // 10ms
                             }
                         }
                         
@@ -639,6 +634,9 @@ extension USBFormatterService {
     private func checkISORequirements(isoPath: URL, fileSystem: FileSystemType, logHandler: (String, LogLevel) -> Void) async throws {
         guard fileSystem == .fat32 || fileSystem == .fat else { return }
 
+        let wimSplitCapable = findWimlib() != nil
+        var announcedWimSplit = false
+
         // Mount ISO read-only to check file sizes
         logHandler("Mounting ISO to check file sizes...", .debug)
         let mountPoint = try await mountISO(isoPath)
@@ -657,7 +655,23 @@ extension USBFormatterService {
             while let fileURL = enumerator?.nextObject() as? URL {
                 let resources = try? fileURL.resourceValues(forKeys: [.fileSizeKey])
                 if let size = resources?.fileSize, Int64(size) > limit {
-                    throw FormatterError.largeFileOnFAT32(fileURL.lastPathComponent)
+                    let fileName = fileURL.lastPathComponent
+                    let lowercasedName = fileName.lowercased()
+                    let isSplittableWIM = lowercasedName == "install.wim" || lowercasedName == "install.esd"
+
+                    if isSplittableWIM && wimSplitCapable {
+                        if !announcedWimSplit {
+                            logHandler("Large WIM file detected (\(fileName)). Wimlib is available, so automatic splitting will be used during copy.", .info)
+                            announcedWimSplit = true
+                        }
+                        continue
+                    }
+
+                    if isSplittableWIM && !wimSplitCapable {
+                        logHandler("Found \(fileName) larger than FAT32 limits, but wimlib-imagex was not found. Install wimlib or switch to a non-FAT filesystem.", .error)
+                    }
+
+                    throw FormatterError.largeFileOnFAT32(fileName)
                 }
             }
             
@@ -735,26 +749,45 @@ extension USBFormatterService {
     
     private func findWimlib() -> String? {
         // 1. Check Bundle
-        if let bundledURL = Bundle.main.url(forResource: "wimlib-imagex", withExtension: nil),
-           FileManager.default.fileExists(atPath: bundledURL.path) {
-            return bundledURL.path
+        if let bundledURL = Bundle.main.url(forResource: "wimlib-imagex", withExtension: nil) {
+            print("DEBUG: Found bundled wimlib at \(bundledURL.path)")
+            if FileManager.default.fileExists(atPath: bundledURL.path) {
+                return bundledURL.path
+            }
+        } else {
+            print("DEBUG: Bundled wimlib not found in resources")
         }
         
         // 2. Check Homebrew (Apple Silicon)
-        if FileManager.default.fileExists(atPath: "/opt/homebrew/bin/wimlib-imagex") {
-            return "/opt/homebrew/bin/wimlib-imagex"
+        let brewPathARM = "/opt/homebrew/bin/wimlib-imagex"
+        if FileManager.default.fileExists(atPath: brewPathARM) {
+            print("DEBUG: Found Homebrew (ARM) wimlib at \(brewPathARM)")
+            return brewPathARM
+        } else {
+            print("DEBUG: Homebrew (ARM) wimlib not found at \(brewPathARM)")
         }
         
         // 3. Check Homebrew (Intel)
-        if FileManager.default.fileExists(atPath: "/usr/local/bin/wimlib-imagex") {
-            return "/usr/local/bin/wimlib-imagex"
+        let brewPathIntel = "/usr/local/bin/wimlib-imagex"
+        if FileManager.default.fileExists(atPath: brewPathIntel) {
+            print("DEBUG: Found Homebrew (Intel) wimlib at \(brewPathIntel)")
+            return brewPathIntel
         }
         
-        // 4. Check System (Unlikely but possible)
+        // 4. Check System
         if FileManager.default.fileExists(atPath: "/usr/bin/wimlib-imagex") {
             return "/usr/bin/wimlib-imagex"
         }
         
+        // 5. Check Development Path (Source Directory)
+        // This allows running from Xcode even if bundling fails
+        let devPath = URL(fileURLWithPath: #file).deletingLastPathComponent().appendingPathComponent("wimlib-imagex").path
+        if FileManager.default.fileExists(atPath: devPath) {
+            print("DEBUG: Found dev wimlib at \(devPath)")
+            return devPath
+        }
+        
+        print("DEBUG: wimlib-imagex not found anywhere")
         return nil
     }
     
