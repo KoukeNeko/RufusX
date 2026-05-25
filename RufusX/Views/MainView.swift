@@ -84,17 +84,16 @@ struct DrivePropertiesSection: View {
                         // Boot Selection Picker
                         Picker("", selection: $viewModel.options.bootSelection) {
                             ForEach(BootSelection.allCases) { selection in
-                                let isSupported = RufusSupportMatrix.isSupported(selection)
-                                Text(RufusSupportMatrix.optionTitle(selection.rawValue, isSupported: isSupported))
+                                let status = RufusSupportMatrix.status(for: selection)
+                                Text(RufusSupportMatrix.optionTitle(selection.rawValue, status: status))
                                     .tag(selection)
-                                    .disabled(!isSupported)
                             }
                         }
                         .labelsHidden()
-                        .frame(width: 180)
+                        .frame(width: 230)
 
-                        if viewModel.options.bootSelection == .diskOrIso {
-                            // ISO Selection Button
+                        if viewModel.options.bootSelection.needsSourceImage {
+                            // Source image selection button
                             Button(action: {
                                 viewModel.selectISO()
                             }) {
@@ -118,7 +117,10 @@ struct DrivePropertiesSection: View {
                                 .help("Compute checksum")
                             }
                         } else {
-                            Spacer()
+                            Text(RufusSupportMatrix.status(for: viewModel.options.bootSelection).detail)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .lineLimit(2)
                         }
                     }
                 }
@@ -129,17 +131,25 @@ struct DrivePropertiesSection: View {
                         .font(.subheadline)
 
                     HStack {
-                        Slider(value: .constant(0), in: 0...32)
-                            .disabled(true)
+                        Slider(
+                            value: Binding(
+                                get: { Double(viewModel.options.persistentPartitionSizeGB) },
+                                set: { viewModel.options.persistentPartitionSizeGB = Int($0) }
+                            ),
+                            in: 0...32
+                        )
 
-                        TextField("", value: .constant(0), format: .number)
+                        TextField(
+                            "",
+                            value: $viewModel.options.persistentPartitionSizeGB,
+                            format: .number
+                        )
                             .frame(width: 50)
                             .textFieldStyle(.roundedBorder)
-                            .disabled(true)
 
                         Text("GB")
 
-                        Text(RufusSupportMatrix.notSupportedYetLabel)
+                        Text(RufusSupportMatrix.capability(for: .linuxPersistence).status.label)
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
@@ -153,10 +163,9 @@ struct DrivePropertiesSection: View {
 
                         Picker("", selection: $viewModel.options.partitionScheme) {
                             ForEach(PartitionScheme.allCases) { scheme in
-                                let isSupported = RufusSupportMatrix.isSupported(scheme)
-                                Text(RufusSupportMatrix.optionTitle(scheme.rawValue, isSupported: isSupported))
+                                let status = RufusSupportMatrix.status(for: scheme)
+                                Text(RufusSupportMatrix.optionTitle(scheme.rawValue, status: status))
                                     .tag(scheme)
-                                    .disabled(!isSupported)
                             }
                         }
                         .labelsHidden()
@@ -170,10 +179,9 @@ struct DrivePropertiesSection: View {
 
                         Picker("", selection: $viewModel.options.targetSystem) {
                             ForEach(TargetSystem.allCases) { system in
-                                let isSupported = RufusSupportMatrix.isSupported(system)
-                                Text(RufusSupportMatrix.optionTitle(system.rawValue, isSupported: isSupported))
+                                let status = RufusSupportMatrix.status(for: system)
+                                Text(RufusSupportMatrix.optionTitle(system.rawValue, status: status))
                                     .tag(system)
-                                    .disabled(!isSupported)
                             }
                         }
                         .labelsHidden()
@@ -189,20 +197,17 @@ struct DrivePropertiesSection: View {
                             "List USB Hard Drives",
                             isOn: $viewModel.options.advancedDriveProperties.listUSBHardDrives
                         )
-                        .disabled(true)
 
                         Toggle(
                             "Add fixes for old BIOSes (extra partition, align, etc.)",
                             isOn: $viewModel.options.advancedDriveProperties.addFixesForOldBIOS
                         )
-                        .disabled(true)
 
                         HStack {
                             Toggle(
                                 "Use Rufus MBR with BIOS ID",
                                 isOn: $viewModel.options.advancedDriveProperties.useRufusMBRWithBIOSID
                             )
-                            .disabled(true)
 
                             Picker("", selection: $viewModel.options.advancedDriveProperties.biosID) {
                                 Text("0x80 (Default)").tag("0x80 (Default)")
@@ -211,10 +216,10 @@ struct DrivePropertiesSection: View {
                             }
                             .labelsHidden()
                             .frame(width: 120)
-                            .disabled(true)
+                            .disabled(!viewModel.options.advancedDriveProperties.useRufusMBRWithBIOSID)
                         }
 
-                        Text(RufusSupportMatrix.notSupportedYetLabel)
+                        Text(RufusSupportMatrix.capability(for: .biosBoot).status.detail)
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
@@ -258,10 +263,9 @@ struct FormatOptionsSection: View {
 
                         Picker("", selection: $viewModel.options.fileSystem) {
                             ForEach(FileSystemType.allCases) { fs in
-                                let isSupported = RufusSupportMatrix.isSupported(fs)
-                                Text(RufusSupportMatrix.optionTitle(fs.displayName, isSupported: isSupported))
+                                let status = RufusSupportMatrix.status(for: fs)
+                                Text(RufusSupportMatrix.optionTitle(fs.displayName, status: status))
                                     .tag(fs)
-                                    .disabled(!isSupported)
                             }
                         }
                         .labelsHidden()
@@ -279,8 +283,7 @@ struct FormatOptionsSection: View {
                             }
                         }
                         .labelsHidden()
-                        .disabled(true)
-                        .help(RufusSupportMatrix.notSupportedYetLabel)
+                        .help("Cluster size customization is part of the Rufus feature surface.")
                     }
                 }
 
@@ -293,20 +296,17 @@ struct FormatOptionsSection: View {
                             "Quick format",
                             isOn: $viewModel.options.advancedFormatOptions.quickFormat
                         )
-                        .disabled(true)
 
                         Toggle(
                             "Create extended label and icon files",
                             isOn: $viewModel.options.advancedFormatOptions.createExtendedLabel
                         )
-                        .disabled(true)
 
                         HStack {
                             Toggle(
                                 "Check device for bad blocks",
                                 isOn: $viewModel.options.advancedFormatOptions.checkDeviceForBadBlocks
                             )
-                            .disabled(true)
 
                             Picker("", selection: $viewModel.options.advancedFormatOptions.badBlockPasses) {
                                 Text("1 pass").tag(1)
@@ -316,10 +316,10 @@ struct FormatOptionsSection: View {
                             }
                             .labelsHidden()
                             .frame(width: 80)
-                            .disabled(true)
+                            .disabled(!viewModel.options.advancedFormatOptions.checkDeviceForBadBlocks)
                         }
 
-                        Text(RufusSupportMatrix.notSupportedYetLabel)
+                        Text(RufusSupportMatrix.capability(for: .badBlocks).status.detail)
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
@@ -361,6 +361,14 @@ struct StatusSection: View {
                     .foregroundColor(viewModel.supportStatusIsBlocking ? .orange : .secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .multilineTextAlignment(.leading)
+
+                if viewModel.shouldShowCurrentJobPlan {
+                    Text("Plan: \(viewModel.currentJobPlan.destructiveSteps.joined(separator: " -> "))")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .lineLimit(3)
+                }
             }
             .padding(8)
         } label: {
@@ -445,7 +453,7 @@ struct BottomToolbar: View {
                         viewModel.startOperation()
                     }
                     .disabled(!viewModel.canStart)
-                    .help(viewModel.startBlockerMessage ?? RufusSupportMatrix.supportedPathDescription)
+                    .help(viewModel.startBlockerMessage ?? viewModel.currentJobPlan.summary)
                     .keyboardShortcut(.defaultAction)
 
                     Button("CLOSE") {

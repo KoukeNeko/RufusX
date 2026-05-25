@@ -28,13 +28,15 @@ final class RufusViewModel: ObservableObject {
     @Published var showAboutDialog: Bool = false
     @Published var isoChecksum = ISOChecksum()
     @Published var isoProbeState: ISOProbeState = .idle
+    @Published var toolStatuses: [RufusToolStatus] = []
     @Published var logEntries: [LogEntry] = []
 
     // MARK: - Dependencies
 
     let driveManager = DriveManager()
     private let formatterService = USBFormatterService()
-    private let isoProbeService = ISOProbeService()
+    private let imageAnalyzer = ImageAnalyzerService()
+    private let toolManager = RufusToolManager()
 
     // MARK: - Private Properties
 
@@ -55,31 +57,65 @@ final class RufusViewModel: ObservableObject {
             return "Select a USB drive."
         }
 
-        if options.isoFilePath == nil {
-            return "Select a Windows installer ISO."
-        }
-
-        if let unsupportedReason = RufusSupportMatrix.validate(options: options) {
-            return unsupportedReason
-        }
-
-        if !isoProbeState.canStart {
+        if case .probing = isoProbeState {
             return isoProbeState.message
+        }
+
+        if options.bootSelection.needsSourceImage && options.isoFilePath == nil {
+            return "Select a source image."
+        }
+
+        if let blocker = currentJobPlan.blocker {
+            return blocker
         }
 
         return nil
     }
 
     var supportStatusMessage: String {
-        if let unsupportedReason = RufusSupportMatrix.validate(options: options) {
-            return unsupportedReason
+        if case .probing = isoProbeState {
+            return isoProbeState.message
         }
 
-        return isoProbeState.message
+        var blockers: [String] = []
+
+        if selectedDevice == nil {
+            blockers.append("Select a USB drive.")
+        }
+
+        if isoProbeState.isBlocking {
+            blockers.append(isoProbeState.message)
+        }
+
+        if let blocker = currentJobPlan.blocker {
+            blockers.append(blocker)
+        }
+
+        if !blockers.isEmpty {
+            return blockers.joined(separator: " ")
+        }
+
+        return currentJobPlan.summary
     }
 
     var supportStatusIsBlocking: Bool {
-        RufusSupportMatrix.validate(options: options) != nil || isoProbeState.isBlocking
+        selectedDevice == nil || currentJobPlan.blocker != nil || isoProbeState.isBlocking
+    }
+
+    var shouldShowCurrentJobPlan: Bool {
+        startBlockerMessage == nil && !currentJobPlan.destructiveSteps.isEmpty
+    }
+
+    var currentImageKind: ImageKind {
+        isoProbeState.imageKind
+    }
+
+    var currentJobPlan: RufusJobPlan {
+        RufusJobPlanner.makePlan(
+            options: options,
+            imageKind: currentImageKind,
+            tools: toolStatuses
+        )
     }
 
     var deviceCount: Int {
@@ -95,6 +131,7 @@ final class RufusViewModel: ObservableObject {
     // MARK: - Initialization
 
     init() {
+        toolStatuses = toolManager.inventory()
         setupBindings()
         // Initialize log buffer
         logBufferHelper = LogBuffer { [weak self] entries in
@@ -108,26 +145,24 @@ final class RufusViewModel: ObservableObject {
 
     func selectISO() {
         let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.init(filenameExtension: "iso")!]
+        let extensions = ["iso", "img", "dd", "raw", "gz", "xz", "zip", "7z", "bz2", "vhd", "vhdx", "ffu"]
+        panel.allowedContentTypes = extensions.compactMap { UTType(filenameExtension: $0) }
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
-        panel.message = "Select an ISO image file"
+        panel.message = "Select a bootable ISO, disk image, VHD, VHDX, FFU, or compressed image"
         panel.prompt = "Select"
 
         if panel.runModal() == .OK, let url = panel.url {
             options.isoFilePath = url
-            options.partitionScheme = RufusSupportMatrix.supportedPartitionScheme
-            options.targetSystem = RufusSupportMatrix.supportedTargetSystem
-            options.fileSystem = RufusSupportMatrix.supportedFileSystem
-            options.persistentPartitionSizeGB = 0
-            options.ddMode = false
+            options.bootSelection = recommendedBootSelection(for: url)
+            options.ddMode = options.bootSelection == .rawDiskImage
             isoProbeState = .probing
             if !status.isInProgress {
                 status = .ready
             }
             updateVolumeLabelFromISO(url)
             calculateChecksums(for: url)
-            probeSelectedISO(url)
+            analyzeSelectedSourceImage(url)
         }
     }
 
@@ -143,7 +178,12 @@ final class RufusViewModel: ObservableObject {
         status = .preparing
         startTimer()
         driveManager.isPaused = true
+        toolStatuses = toolManager.inventory()
         addLog("Starting operation on \(device.displayName)", level: .info)
+        for warning in currentJobPlan.warnings {
+            addLog(warning, level: .warning)
+        }
+        addLog("Planned steps: \(currentJobPlan.destructiveSteps.joined(separator: " -> "))", level: .info)
 
         // Capture the buffer instance to use directly from background threads
         // This avoids hopping to the MainActor for every log message
@@ -197,6 +237,7 @@ final class RufusViewModel: ObservableObject {
 
     func refreshDevices() {
         driveManager.refreshDevices()
+        toolStatuses = toolManager.inventory()
     }
 
     // MARK: - Private Methods
@@ -226,26 +267,37 @@ final class RufusViewModel: ObservableObject {
         options.volumeLabel = String(filename.prefix(32))
     }
 
-    private func probeSelectedISO(_ url: URL) {
+    private func analyzeSelectedSourceImage(_ url: URL) {
         Task {
             do {
-                try await isoProbeService.validateWindowsISO(url)
+                let imageKind = try await imageAnalyzer.analyze(url)
 
                 guard options.isoFilePath == url else { return }
-                isoProbeState = .supportedWindows
-                addLog("Validated Windows ISO: \(url.lastPathComponent)", level: .success)
+                isoProbeState = .analyzed(imageKind)
+                addLog("Detected \(imageKind.displayName): \(url.lastPathComponent)", level: imageKind.isRunnableSource ? .success : .warning)
             } catch {
                 guard options.isoFilePath == url else { return }
 
-                if let probeError = error as? ISOProbeService.ProbeError,
-                   probeError == .notWindowsISO {
-                    isoProbeState = .unsupported(error.localizedDescription)
-                } else {
-                    isoProbeState = .failed("ISO validation failed: \(error.localizedDescription)")
-                }
-
+                isoProbeState = .failed("Image analysis failed: \(error.localizedDescription)")
                 addLog(isoProbeState.message, level: .error)
             }
+        }
+    }
+
+    private func recommendedBootSelection(for url: URL) -> BootSelection {
+        switch url.pathExtension.lowercased() {
+        case "img", "dd", "raw":
+            return .rawDiskImage
+        case "gz", "xz", "zip", "7z", "bz2":
+            return .compressedImage
+        case "vhd":
+            return .vhd
+        case "vhdx":
+            return .vhdx
+        case "ffu":
+            return .ffu
+        default:
+            return .diskOrIso
         }
     }
 

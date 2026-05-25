@@ -73,24 +73,27 @@ final class USBFormatterService {
 
         isCancelled = false
 
-        if let unsupportedReason = RufusSupportMatrix.validate(options: options) {
-            throw FormatterError.unsupportedConfiguration(unsupportedReason)
+        let imageKind: ImageKind
+        if let sourceURL = options.isoFilePath {
+            imageKind = try await ImageAnalyzerService().analyze(sourceURL)
+        } else {
+            imageKind = .none
         }
 
-        guard let isoPath = options.isoFilePath else {
-            throw FormatterError.unsupportedConfiguration("Select a Windows installer ISO before starting.")
-        }
-
-        logHandler("Validating supported Windows ISO before touching the USB drive...", .info)
+        logHandler("Planning Rufus job before touching the USB drive...", .info)
         progressHandler(.verifying(progress: 0.05))
-        do {
-            try await ISOProbeService().validateWindowsISO(isoPath)
-        } catch {
-            throw FormatterError.unsupportedConfiguration(error.localizedDescription)
+        let toolInventory = RufusToolManager().inventory()
+        let jobPlan = RufusJobPlanner.makePlan(options: options, imageKind: imageKind, tools: toolInventory)
+        if let blocker = jobPlan.blocker {
+            throw FormatterError.unsupportedConfiguration(blocker)
         }
+        for warning in jobPlan.warnings {
+            logHandler(warning, .warning)
+        }
+        logHandler("Planned steps: \(jobPlan.destructiveSteps.joined(separator: " -> "))", .info)
 
         // DD Mode Path
-        if options.ddMode, let isoPath = options.isoFilePath {
+        if (options.ddMode || options.bootSelection == .rawDiskImage), let isoPath = options.isoFilePath {
             progressHandler(.preparing)
             try await writeImageDD(
                 device: device,
@@ -107,7 +110,7 @@ final class USBFormatterService {
         // Standard Mode Path
         
         // Pre-flight Check: FAT32 > 4GB
-        if let isoPath = options.isoFilePath {
+        if (options.bootSelection == .diskOrIso || options.bootSelection == .uefiShell), let isoPath = options.isoFilePath {
             logHandler("Checking ISO requirements...", .info)
             try await checkISORequirements(isoPath: isoPath, fileSystem: options.fileSystem, logHandler: logHandler)
         }

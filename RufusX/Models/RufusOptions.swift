@@ -135,10 +135,25 @@ struct ISODownloadOptions {
 enum BootSelection: String, CaseIterable, Identifiable {
     case nonBootable = "Non bootable"
     case diskOrIso = "Disk or ISO image"
-    // Future: case freeDOS = "FreeDOS"
-    // Future: case syslinux = "Syslinux"
+    case freeDOS = "FreeDOS"
+    case msDOS = "MS-DOS"
+    case uefiShell = "UEFI Shell"
+    case rawDiskImage = "Raw disk image"
+    case compressedImage = "Compressed image"
+    case vhd = "VHD/DD image"
+    case vhdx = "VHDX image"
+    case ffu = "FFU image"
 
     var id: String { rawValue }
+
+    var needsSourceImage: Bool {
+        switch self {
+        case .nonBootable, .freeDOS, .msDOS:
+            return false
+        case .diskOrIso, .uefiShell, .rawDiskImage, .compressedImage, .vhd, .vhdx, .ffu:
+            return true
+        }
+    }
 }
 
 // MARK: - Advanced Drive Properties
@@ -175,6 +190,7 @@ struct RufusOptions {
     var isoFilePath: URL?
     var persistentPartitionSizeGB: Int
     var ddMode: Bool
+    var imageOption: ImageOption
     
     // Advanced Options
     var advancedDriveProperties: AdvancedDriveProperties
@@ -196,6 +212,7 @@ struct RufusOptions {
         isoFilePath: URL? = nil,
         persistentPartitionSizeGB: Int = 0,
         ddMode: Bool = false,
+        imageOption: ImageOption = .standardInstallation,
         advancedDriveProperties: AdvancedDriveProperties = AdvancedDriveProperties(),
         advancedFormatOptions: AdvancedFormatOptions = AdvancedFormatOptions(),
         windowsCustomization: WindowsCustomizationOptions = WindowsCustomizationOptions(),
@@ -214,6 +231,7 @@ struct RufusOptions {
         self.isoFilePath = isoFilePath
         self.persistentPartitionSizeGB = persistentPartitionSizeGB
         self.ddMode = ddMode
+        self.imageOption = imageOption
         self.advancedDriveProperties = advancedDriveProperties
         self.advancedFormatOptions = advancedFormatOptions
         self.windowsCustomization = windowsCustomization
