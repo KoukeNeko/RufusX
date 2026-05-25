@@ -27,12 +27,14 @@ final class RufusViewModel: ObservableObject {
     @Published var showLogDialog: Bool = false
     @Published var showAboutDialog: Bool = false
     @Published var isoChecksum = ISOChecksum()
+    @Published var isoProbeState: ISOProbeState = .idle
     @Published var logEntries: [LogEntry] = []
 
     // MARK: - Dependencies
 
     let driveManager = DriveManager()
     private let formatterService = USBFormatterService()
+    private let isoProbeService = ISOProbeService()
 
     // MARK: - Private Properties
 
@@ -45,7 +47,39 @@ final class RufusViewModel: ObservableObject {
     // MARK: - Computed Properties
 
     var canStart: Bool {
-        selectedDevice != nil && options.isoFilePath != nil && !status.isInProgress
+        !status.isInProgress && startBlockerMessage == nil
+    }
+
+    var startBlockerMessage: String? {
+        if selectedDevice == nil {
+            return "Select a USB drive."
+        }
+
+        if options.isoFilePath == nil {
+            return "Select a Windows installer ISO."
+        }
+
+        if let unsupportedReason = RufusSupportMatrix.validate(options: options) {
+            return unsupportedReason
+        }
+
+        if !isoProbeState.canStart {
+            return isoProbeState.message
+        }
+
+        return nil
+    }
+
+    var supportStatusMessage: String {
+        if let unsupportedReason = RufusSupportMatrix.validate(options: options) {
+            return unsupportedReason
+        }
+
+        return isoProbeState.message
+    }
+
+    var supportStatusIsBlocking: Bool {
+        RufusSupportMatrix.validate(options: options) != nil || isoProbeState.isBlocking
     }
 
     var deviceCount: Int {
@@ -82,13 +116,29 @@ final class RufusViewModel: ObservableObject {
 
         if panel.runModal() == .OK, let url = panel.url {
             options.isoFilePath = url
+            options.partitionScheme = RufusSupportMatrix.supportedPartitionScheme
+            options.targetSystem = RufusSupportMatrix.supportedTargetSystem
+            options.fileSystem = RufusSupportMatrix.supportedFileSystem
+            options.persistentPartitionSizeGB = 0
+            options.ddMode = false
+            isoProbeState = .probing
+            if !status.isInProgress {
+                status = .ready
+            }
             updateVolumeLabelFromISO(url)
             calculateChecksums(for: url)
+            probeSelectedISO(url)
         }
     }
 
     func startOperation() {
-        guard canStart, let device = selectedDevice else { return }
+        guard canStart, let device = selectedDevice else {
+            if let message = startBlockerMessage {
+                status = .failed(message: message)
+                addLog(message, level: .error)
+            }
+            return
+        }
 
         status = .preparing
         startTimer()
@@ -118,12 +168,6 @@ final class RufusViewModel: ObservableObject {
                     self.stopTimer()
                     self.driveManager.isPaused = false
                     self.driveManager.refreshDevices()
-                }
-            } catch USBFormatterService.FormatterError.largeFileOnFAT32 {
-                await MainActor.run {
-                    self.addLog("Large file detected (>4GB). Switching to ExFAT and retrying...", level: .warning)
-                    self.options.fileSystem = .exfat
-                    self.startOperation()
                 }
             } catch {
                 await MainActor.run {
@@ -180,6 +224,29 @@ final class RufusViewModel: ObservableObject {
     private func updateVolumeLabelFromISO(_ url: URL) {
         let filename = url.deletingPathExtension().lastPathComponent
         options.volumeLabel = String(filename.prefix(32))
+    }
+
+    private func probeSelectedISO(_ url: URL) {
+        Task {
+            do {
+                try await isoProbeService.validateWindowsISO(url)
+
+                guard options.isoFilePath == url else { return }
+                isoProbeState = .supportedWindows
+                addLog("Validated Windows ISO: \(url.lastPathComponent)", level: .success)
+            } catch {
+                guard options.isoFilePath == url else { return }
+
+                if let probeError = error as? ISOProbeService.ProbeError,
+                   probeError == .notWindowsISO {
+                    isoProbeState = .unsupported(error.localizedDescription)
+                } else {
+                    isoProbeState = .failed("ISO validation failed: \(error.localizedDescription)")
+                }
+
+                addLog(isoProbeState.message, level: .error)
+            }
+        }
     }
 
     private func calculateChecksums(for url: URL) {

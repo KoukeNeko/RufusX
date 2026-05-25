@@ -22,6 +22,7 @@ final class USBFormatterService {
         case cancelled
         case largeFileOnFAT32(String)
         case ddFailed(String)
+        case unsupportedConfiguration(String)
 
         var errorDescription: String? {
             switch self {
@@ -45,6 +46,8 @@ final class USBFormatterService {
                 return "File '\(filename)' is too large for FAT32. Please use ExFAT or NTFS."
             case .ddFailed(let message):
                 return "DD Write failed: \(message)"
+            case .unsupportedConfiguration(let message):
+                return message
             }
         }
     }
@@ -69,6 +72,22 @@ final class USBFormatterService {
     ) async throws {
 
         isCancelled = false
+
+        if let unsupportedReason = RufusSupportMatrix.validate(options: options) {
+            throw FormatterError.unsupportedConfiguration(unsupportedReason)
+        }
+
+        guard let isoPath = options.isoFilePath else {
+            throw FormatterError.unsupportedConfiguration("Select a Windows installer ISO before starting.")
+        }
+
+        logHandler("Validating supported Windows ISO before touching the USB drive...", .info)
+        progressHandler(.verifying(progress: 0.05))
+        do {
+            try await ISOProbeService().validateWindowsISO(isoPath)
+        } catch {
+            throw FormatterError.unsupportedConfiguration(error.localizedDescription)
+        }
 
         // DD Mode Path
         if options.ddMode, let isoPath = options.isoFilePath {
