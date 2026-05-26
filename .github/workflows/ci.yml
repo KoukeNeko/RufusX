@@ -132,7 +132,7 @@ jobs:
           scripts/package_dmg.sh "${args[@]}"
 
       - name: Upload DMG artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: RufusX-DMG
           path: artifacts/*.dmg
