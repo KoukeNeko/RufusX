@@ -32,7 +32,7 @@ struct LogView: View {
                         .id(entry.id)
                     }
                     .listStyle(.plain)
-                    .onChange(of: logEntries.count) { _ in
+                    .onChange(of: logEntries.count) { _, _ in
                         if autoScroll, let lastId = logEntries.last?.id {
                             // Remove animation for performance
                             proxy.scrollTo(lastId, anchor: .bottom)

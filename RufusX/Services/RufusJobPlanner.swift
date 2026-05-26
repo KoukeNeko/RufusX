@@ -13,12 +13,20 @@ enum RufusJobPlanner {
         imageKind: ImageKind,
         tools: [RufusToolStatus]
     ) -> RufusJobPlan {
-        let statuses = [
+        var statuses = [
             RufusSupportMatrix.status(for: options.bootSelection),
             RufusSupportMatrix.status(for: options.partitionScheme),
             RufusSupportMatrix.status(for: options.targetSystem),
             RufusSupportMatrix.status(for: options.fileSystem)
         ]
+
+        if imageKind == .windowsInstaller {
+            statuses.append(RufusSupportMatrix.status(for: options.imageOption))
+
+            if options.windowsCustomization.hasEnabledOptions {
+                statuses.append(RufusSupportMatrix.capability(for: .windowsOOBE).status)
+            }
+        }
 
         var warnings = statuses
             .filter { !$0.blocksExecution }
@@ -37,10 +45,18 @@ enum RufusJobPlanner {
             warnings.append(RufusSupportMatrix.capability(for: .linuxPersistence).status.detail)
         }
 
+        if options.advancedFormatOptions.checkDeviceForBadBlocks {
+            warnings.append(RufusSupportMatrix.capability(for: .badBlocks).status.detail)
+        }
+
         var blocker = statuses.first(where: \.blocksExecution).map { "\($0.label): \($0.detail)" }
 
         if blocker == nil {
             blocker = sourceImageBlocker(options: options, imageKind: imageKind)
+        }
+
+        if blocker == nil {
+            blocker = executionBlocker(options: options, imageKind: imageKind)
         }
 
         if blocker == nil {
@@ -94,39 +110,73 @@ enum RufusJobPlanner {
         }
     }
 
-    private static func toolBlocker(options: RufusOptions, imageKind: ImageKind, tools: [RufusToolStatus]) -> String? {
-        func hasTool(_ tool: RufusTool) -> Bool {
-            tools.first(where: { $0.tool == tool })?.isAvailable == true
+    private static func executionBlocker(options: RufusOptions, imageKind: ImageKind) -> String? {
+        if options.ddMode && options.bootSelection != .rawDiskImage {
+            return "DD mode is only wired for Raw disk image boot selection."
         }
 
         switch options.bootSelection {
         case .freeDOS:
-            return hasTool(.dosfstools) ? nil : "FreeDOS media requires bundled DOS boot assets before execution."
-        case .uefiShell:
-            return nil
+            return "FreeDOS is visible in the UI, but DOS boot asset deployment is not wired into the executor yet."
         case .compressedImage:
-            return hasTool(.qemuImg) ? nil : "Compressed image writing requires a bundled extraction backend."
+            return "Compressed image extraction/write is visible in the UI, but the executor backend is not wired yet."
         case .vhd:
-            return hasTool(.qemuImg) ? nil : "VHD/DD image writing requires qemu-img or an equivalent bundled backend."
-        case .vhdx, .ffu, .msDOS:
+            return "VHD/DD image handling is visible in the UI, but the qemu-img conversion/write executor is not wired yet."
+        case .msDOS, .vhdx, .ffu:
             return RufusSupportMatrix.status(for: options.bootSelection).detail
-        case .nonBootable, .diskOrIso, .rawDiskImage:
+        case .nonBootable, .diskOrIso, .uefiShell, .rawDiskImage:
             break
         }
 
         switch options.fileSystem {
         case .ntfs:
-            return hasTool(.ntfsWriter) ? nil : "NTFS formatting requires a bundled NTFS writer backend."
+            return "NTFS is visible in the UI, but the formatter still needs a real NTFS backend before it can erase a USB as NTFS."
         case .ext2, .ext3, .ext4:
-            return hasTool(.e2fsprogs) ? nil : "ext filesystem formatting requires bundled e2fsprogs-compatible tools."
+            return "ext filesystems are visible in the UI, but the formatter still needs an e2fsprogs-backed erase path before destructive use."
         case .refs:
             return RufusSupportMatrix.status(for: .refs).detail
         case .fat, .fat32, .exfat, .udf, .apfs:
             break
         }
 
-        if imageKind == .windowsInstaller && options.fileSystem == .ntfs && !hasTool(.uefiNTFS) {
-            return "Windows UEFI:NTFS media requires bundled UEFI:NTFS assets."
+        if options.imageOption == .windowsToGo {
+            return "Windows To Go is visible in the UI, but deployment is not wired into the executor yet."
+        }
+
+        if imageKind == .windowsInstaller && options.windowsCustomization.hasEnabledOptions {
+            return "Windows customization is visible in the UI, but unattended/OOBE injection is not wired into media creation yet."
+        }
+
+        if options.persistentPartitionSizeGB > 0 && imageKind != .linuxISO {
+            return "Persistent partitions require a Linux ISO source."
+        }
+
+        if options.clusterSize != .auto {
+            return "Custom cluster sizes are visible in the UI, but the diskutil formatter still uses the platform default."
+        }
+
+        if !options.advancedFormatOptions.quickFormat {
+            return "Full format is visible in the UI, but only quick format is wired safely right now."
+        }
+
+        if options.advancedDriveProperties.addFixesForOldBIOS {
+            return "Old BIOS compatibility fixes are visible in the UI, but the executor does not apply them yet."
+        }
+
+        if options.advancedDriveProperties.useRufusMBRWithBIOSID {
+            return "Rufus MBR BIOS ID selection is visible in the UI, but MBR patching is not wired yet."
+        }
+
+        return nil
+    }
+
+    private static func toolBlocker(options: RufusOptions, imageKind _: ImageKind, tools: [RufusToolStatus]) -> String? {
+        func hasTool(_ tool: RufusTool) -> Bool {
+            tools.first(where: { $0.tool == tool })?.isAvailable == true
+        }
+
+        if options.persistentPartitionSizeGB > 0 && !hasTool(.e2fsprogs) {
+            return "Linux persistence requires bundled e2fsprogs-compatible tools before it can create a real persistence partition."
         }
 
         return nil

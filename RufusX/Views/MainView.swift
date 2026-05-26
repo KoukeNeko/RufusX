@@ -125,6 +125,32 @@ struct DrivePropertiesSection: View {
                     }
                 }
 
+                if viewModel.currentImageKind == .windowsInstaller {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Image option")
+                            .font(.subheadline)
+
+                        HStack {
+                            Picker("", selection: $viewModel.options.imageOption) {
+                                ForEach(ImageOption.allCases) { option in
+                                    let status = RufusSupportMatrix.status(for: option)
+                                    Text(RufusSupportMatrix.optionTitle(option.rawValue, status: status))
+                                        .tag(option)
+                                }
+                            }
+                            .labelsHidden()
+
+                            Button("Windows User Experience...") {
+                                viewModel.showWindowsCustomization = true
+                            }
+                        }
+
+                        Text(RufusSupportMatrix.capability(for: .windowsOOBE).status.detail)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+
                 // Persistent Partition Size (for Linux)
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Persistent partition size")

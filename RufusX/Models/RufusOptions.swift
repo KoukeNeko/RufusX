@@ -100,14 +100,24 @@ enum ImageOption: String, CaseIterable, Identifiable {
 // MARK: - Windows Customization Options
 
 struct WindowsCustomizationOptions {
-    var removeTPMRequirement: Bool = true
-    var removeSecureBootRequirement: Bool = true
-    var removeRAMRequirement: Bool = true
-    var removeOnlineAccountRequirement: Bool = true
-    var disableDataCollection: Bool = true
+    var removeTPMRequirement: Bool = false
+    var removeSecureBootRequirement: Bool = false
+    var removeRAMRequirement: Bool = false
+    var removeOnlineAccountRequirement: Bool = false
+    var disableDataCollection: Bool = false
     var setLocalAccountName: Bool = false
     var localAccountName: String = NSUserName()
     var useRegionalSettings: Bool = false
+
+    var hasEnabledOptions: Bool {
+        removeTPMRequirement ||
+        removeSecureBootRequirement ||
+        removeRAMRequirement ||
+        removeOnlineAccountRequirement ||
+        disableDataCollection ||
+        setLocalAccountName ||
+        useRegionalSettings
+    }
 }
 
 // MARK: - ISO Checksum

@@ -92,6 +92,22 @@ final class USBFormatterService {
         }
         logHandler("Planned steps: \(jobPlan.destructiveSteps.joined(separator: " -> "))", .info)
 
+        if options.advancedFormatOptions.checkDeviceForBadBlocks {
+            progressHandler(.verifying(progress: 0.1))
+            let badBlockCount = try await checkBadBlocks(
+                device: device,
+                passes: options.advancedFormatOptions.badBlockPasses,
+                progressHandler: { progress in
+                    progressHandler(.verifying(progress: progress))
+                },
+                logHandler: logHandler
+            )
+
+            if badBlockCount > 0 {
+                throw FormatterError.unsupportedConfiguration("Bad block check reported \(badBlockCount) issue(s). The USB drive was not erased.")
+            }
+        }
+
         // DD Mode Path
         if (options.ddMode || options.bootSelection == .rawDiskImage), let isoPath = options.isoFilePath {
             progressHandler(.preparing)
@@ -143,8 +159,8 @@ final class USBFormatterService {
 
         if isCancelled { throw FormatterError.cancelled }
 
-        // Step 4: Mount ISO and copy files (Only for DiskOrIso mode)
-        if options.bootSelection == .diskOrIso, let isoPath = options.isoFilePath {
+        // Step 4: Mount ISO and copy files
+        if (options.bootSelection == .diskOrIso || options.bootSelection == .uefiShell), let isoPath = options.isoFilePath {
             logHandler("Mounting ISO: \(isoPath.lastPathComponent)", .info)
             progressHandler(.copying(progress: 0, currentFile: "Mounting ISO..."))
 

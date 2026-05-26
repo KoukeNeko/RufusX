@@ -299,6 +299,15 @@ enum RufusSupportMatrix {
         }
     }
 
+    static func status(for imageOption: ImageOption) -> CapabilityStatus {
+        switch imageOption {
+        case .standardInstallation:
+            return .available("Creates standard installer media.")
+        case .windowsToGo:
+            return capability(for: .windowsToGo).status
+        }
+    }
+
     static func optionTitle(_ title: String, status: CapabilityStatus) -> String {
         switch status {
         case .available:

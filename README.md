@@ -97,6 +97,35 @@ only after automated checks plus VM or physical USB boot validation.
 xcodebuild -project RufusX.xcodeproj -scheme RufusX -configuration Debug -derivedDataPath /tmp/RufusXDerivedData-cca7 CODE_SIGNING_ALLOWED=NO build
 ```
 
+## Packaging
+
+Build a Developer ID-signed DMG on a Mac that has the Developer ID Application
+certificate installed:
+
+```bash
+scripts/package_dmg.sh --output-dir dist
+```
+
+The script archives the Release app, signs nested executables, signs the app
+bundle, creates a DMG, and signs the DMG. Add `--notarize` with either
+`--notary-profile <profile>` or these environment variables to submit to Apple:
+
+```bash
+APPLE_NOTARY_KEY_PATH=/path/to/AuthKey_XXXXXXXXXX.p8
+APPLE_NOTARY_KEY_ID=XXXXXXXXXX
+APPLE_NOTARY_ISSUER_ID=00000000-0000-0000-0000-000000000000
+```
+
+CI builds every push and pull request without signing. The manual DMG workflow
+can create a signed/notarized artifact when these GitHub secrets are configured:
+
+- `DEVELOPER_ID_APPLICATION_P12_BASE64`
+- `DEVELOPER_ID_APPLICATION_P12_PASSWORD`
+- `BUILD_KEYCHAIN_PASSWORD`
+- `APPLE_NOTARY_KEY_P8_BASE64`
+- `APPLE_NOTARY_KEY_ID`
+- `APPLE_NOTARY_ISSUER_ID`
+
 ## License
 
 GPL-3.0 license
