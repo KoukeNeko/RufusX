@@ -1,3 +1,5 @@
+<img width="1774" height="887" alt="ChatGPT Image 2026年5月28日 12_06_32" src="https://github.com/user-attachments/assets/67b7f20a-5ec8-4cc0-a76c-6415ad9b41dd" />
+ 
 # RufusX for macOS
 
 RufusX is a native macOS USB formatting and boot media utility inspired by
