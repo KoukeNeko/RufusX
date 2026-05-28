@@ -113,6 +113,7 @@ Before any destructive operation, RufusX:
 | OS                    | Architecture | Partition Scheme | Target System  | File System | Status  | Notes                              |
 | :-------------------- | :----------- | :--------------- | :------------- | :---------- | :------ | :--------------------------------- |
 | **Windows 11 (25H2)** | x64          | MBR              | UEFI (non CSM) | exFAT       | Success | Booted and installed successfully. |
+| Windows 10 | x64 | GPT | UEFI (non CSM) | FAT32 | Success | Formatted, written, and booted successfully. |
 
 Additional Rufus parity paths must be promoted from experimental to available
 only after automated checks plus VM or physical USB boot validation.
