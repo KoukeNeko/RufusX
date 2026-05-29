@@ -384,22 +384,29 @@ final class USBFormatterService {
     }
 
     private func mountISO(_ isoPath: URL) async throws -> String {
+        // Attach with -plist and read the mount-point from the structured output.
+        // Parsing hdiutil's human-readable columns is fragile for hybrid
+        // ISO9660/UDF images (e.g. Windows install ISOs) and could fail with
+        // "Could not determine mount point".
         let result = try await runCommand(
             "/usr/bin/hdiutil",
-            arguments: ["attach", isoPath.path, "-nobrowse", "-readonly", "-noverify", "-noautoopen"]
+            arguments: ["attach", isoPath.path, "-plist", "-nobrowse", "-readonly", "-noverify", "-noautoopen"]
         )
 
         guard result.exitCode == 0 else {
             throw FormatterError.isoMountFailed(result.error)
         }
 
-        // Parse mount point from output
-        let lines = result.output.components(separatedBy: "\n")
-        for line in lines.reversed() {
-            let components = line.components(separatedBy: "\t")
-            if let mountPoint = components.last?.trimmingCharacters(in: .whitespaces),
-               !mountPoint.isEmpty,
-               FileManager.default.fileExists(atPath: mountPoint) {
+        guard let plistData = result.output.data(using: .utf8),
+              let plist = try? PropertyListSerialization.propertyList(from: plistData, options: [], format: nil),
+              let root = plist as? [String: Any],
+              let entities = root["system-entities"] as? [[String: Any]] else {
+            throw FormatterError.isoMountFailed("Could not parse hdiutil output")
+        }
+
+        for entity in entities {
+            if let mountPoint = (entity["mount-point"] as? String)?.trimmingCharacters(in: .whitespaces),
+               !mountPoint.isEmpty {
                 return mountPoint
             }
         }
