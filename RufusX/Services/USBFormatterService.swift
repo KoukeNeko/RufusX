@@ -334,9 +334,21 @@ final class USBFormatterService {
             scheme = "GPT"
         }
 
+        // GPT: -noEFI suppresses diskutil's default ~200 MB EFI System Partition.
+        // That auto-ESP is empty but a valid ESP, so during a Windows install the
+        // target machine's bcdboot can write boot files to the USB's ESP instead of
+        // the internal disk's; removing the USB then breaks boot. A single Microsoft
+        // Basic Data partition (like Rufus) still UEFI-boots via the fallback
+        // \EFI\BOOT\BOOTX64.EFI path.
+        var arguments = ["eraseDisk"]
+        if partitionScheme == .gpt {
+            arguments.append("-noEFI")
+        }
+        arguments.append(contentsOf: [fsType, label, scheme, diskIdentifier])
+
         let result = try await runCommand(
             "/usr/sbin/diskutil",
-            arguments: ["eraseDisk", fsType, label, scheme, diskIdentifier]
+            arguments: arguments
         )
 
         progressHandler(.formatting(progress: 0.9))

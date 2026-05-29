@@ -275,6 +275,10 @@ final class RufusViewModel: ObservableObject {
                 guard options.isoFilePath == url else { return }
                 isoProbeState = .analyzed(imageKind)
                 addLog("Detected \(imageKind.displayName): \(url.lastPathComponent)", level: imageKind.isRunnableSource ? .success : .warning)
+
+                if imageKind == .windowsInstaller {
+                    applyWindowsRecommendedConfig()
+                }
             } catch {
                 guard options.isoFilePath == url else { return }
 
@@ -282,6 +286,15 @@ final class RufusViewModel: ObservableObject {
                 addLog(isoProbeState.message, level: .error)
             }
         }
+    }
+
+    /// Rufus-standard Windows UEFI media: GPT + FAT32 + UEFI (single Basic Data
+    /// partition, no competing ESP). install.wim larger than 4 GB is split via wimlib.
+    private func applyWindowsRecommendedConfig() {
+        options.partitionScheme = .gpt
+        options.targetSystem = .uefi
+        options.fileSystem = .fat32
+        addLog("Applied recommended Windows media settings: GPT + FAT32 + UEFI.", level: .info)
     }
 
     private func recommendedBootSelection(for url: URL) -> BootSelection {

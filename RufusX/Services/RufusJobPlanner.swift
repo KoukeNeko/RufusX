@@ -49,6 +49,12 @@ enum RufusJobPlanner {
             warnings.append(RufusSupportMatrix.capability(for: .badBlocks).status.detail)
         }
 
+        if imageKind == .windowsInstaller
+            && options.partitionScheme == .mbr
+            && options.targetSystem == .uefi {
+            warnings.append("UEFI Windows media is most compatible on GPT. MBR boots via the EFI fallback path, but GPT is recommended.")
+        }
+
         var blocker = statuses.first(where: \.blocksExecution).map { "\($0.label): \($0.detail)" }
 
         if blocker == nil {
@@ -61,6 +67,10 @@ enum RufusJobPlanner {
 
         if blocker == nil {
             blocker = toolBlocker(options: options, imageKind: imageKind, tools: tools)
+        }
+
+        if blocker == nil {
+            blocker = windowsMediaBlocker(options: options, imageKind: imageKind)
         }
 
         let destructiveSteps = blocker == nil ? destructiveSteps(for: options, imageKind: imageKind) : []
@@ -177,6 +187,19 @@ enum RufusJobPlanner {
 
         if options.persistentPartitionSizeGB > 0 && !hasTool(.e2fsprogs) {
             return "Linux persistence requires bundled e2fsprogs-compatible tools before it can create a real persistence partition."
+        }
+
+        return nil
+    }
+
+    private static func windowsMediaBlocker(options: RufusOptions, imageKind: ImageKind) -> String? {
+        guard imageKind == .windowsInstaller else { return nil }
+
+        // FAT32 is the only filesystem RufusX can produce that UEFI-boots Windows
+        // (NTFS needs an unimplemented shim; exFAT/APFS/UDF are not UEFI-bootable).
+        // install.wim larger than 4 GB is split automatically via wimlib.
+        if options.fileSystem != .fat32 {
+            return "Windows install media requires FAT32. exFAT/APFS/UDF are not UEFI-bootable and NTFS is not yet supported; large install.wim files are split automatically."
         }
 
         return nil
