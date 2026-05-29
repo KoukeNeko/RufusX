@@ -39,7 +39,7 @@ main() {
     rm -f "${IMAGE_PATH}"
     hdiutil create -size "${IMAGE_SIZE}" -type SPARSE -layout GPTSPUD "${IMAGE_PATH%.sparseimage}" >/dev/null
 
-    attached_disk="$(hdiutil attach -nomount "${IMAGE_PATH}" | head -1 | awk '{print $1}')"
+    attached_disk="$(hdiutil attach -nomount "${IMAGE_PATH}" | awk 'NR==1{print $1}')"
     if [[ -z "${attached_disk}" ]]; then
         echo "FAIL: could not attach disk image" >&2
         exit 1
