@@ -78,7 +78,7 @@ platform-limited.
 | Target system | BIOS or UEFI | Experimental | Dual BIOS/UEFI setup exists for some ISOs but needs VM and hardware validation. |
 | Target system | BIOS (or UEFI-CSM) | Experimental | Existing syslinux/fdisk path is present but needs full boot validation. |
 | Partition scheme | MBR | Available | Supported by `diskutil`. |
-| Partition scheme | GPT | Experimental | Supported by `diskutil`; boot compatibility varies by image and target system. |
+| Partition scheme | GPT | Experimental | Single Microsoft Basic Data partition with no competing EFI System Partition (`diskutil eraseDisk -noEFI`); on-hardware boot validation in progress. |
 | Windows image option | Standard Windows installation | Available | Creates standard installer media. |
 | Windows image option | Windows To Go | Experimental | UI exists, but deployment is not wired into the executor yet. |
 
@@ -110,10 +110,17 @@ Before any destructive operation, RufusX:
 
 ## Tested Configuration
 
-| OS                    | Architecture | Partition Scheme | Target System  | File System | Status  | Notes                              |
-| :-------------------- | :----------- | :--------------- | :------------- | :---------- | :------ | :--------------------------------- |
-| **Windows 11 (25H2)** | x64          | MBR              | UEFI (non CSM) | exFAT       | Success | Booted and installed successfully. |
-| Windows 10 | x64 | GPT | UEFI (non CSM) | FAT32 | Success | Formatted, written, and booted successfully. |
+For Windows installer media, RufusX defaults to **GPT + FAT32 + UEFI (non CSM)** and lays
+down a single Microsoft Basic Data partition with **no separate EFI System Partition** —
+matching how Rufus structures the media. This avoids a failure mode where the Windows
+installer wrote boot files to a competing ESP on the USB, leaving the target machine
+unbootable after the USB was removed. `install.wim` larger than the FAT32 4 GB limit is
+split with `wimlib`, and exFAT is no longer offered for Windows installers because it is
+not a standard UEFI-bootable filesystem.
+
+| OS                  | Architecture | Partition Scheme | Target System  | File System | Status         | Notes                                                                                                                                            |
+| :------------------ | :----------- | :--------------- | :------------- | :---------- | :------------- | :----------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Windows 11 / 10** | x64          | GPT              | UEFI (non CSM) | FAT32       | Media verified | Single Microsoft Basic Data partition, no competing ESP (verified on a burned USB). Recommended; on-hardware install/boot validation in progress. |
 
 Additional Rufus parity paths must be promoted from experimental to available
 only after automated checks plus VM or physical USB boot validation.
