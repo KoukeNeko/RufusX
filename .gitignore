@@ -4,3 +4,6 @@ xcuserdata/
 *.xcuserstate
 build/
 dist/
+
+# Local secrets (never commit)
+.env
