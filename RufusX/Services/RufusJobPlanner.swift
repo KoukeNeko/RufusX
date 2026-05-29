@@ -195,11 +195,11 @@ enum RufusJobPlanner {
     private static func windowsMediaBlocker(options: RufusOptions, imageKind: ImageKind) -> String? {
         guard imageKind == .windowsInstaller else { return nil }
 
-        // exFAT is not a standard UEFI-bootable filesystem and bootmgr's boot code
-        // cannot read it, so it is never correct for Windows install media. FAT32 is
-        // required; install.wim larger than 4 GB is split automatically via wimlib.
-        if options.fileSystem == .exfat {
-            return "Windows install media requires FAT32, not exFAT. exFAT is not UEFI-bootable; large install.wim files are split automatically."
+        // FAT32 is the only filesystem RufusX can produce that UEFI-boots Windows
+        // (NTFS needs an unimplemented shim; exFAT/APFS/UDF are not UEFI-bootable).
+        // install.wim larger than 4 GB is split automatically via wimlib.
+        if options.fileSystem != .fat32 {
+            return "Windows install media requires FAT32. exFAT/APFS/UDF are not UEFI-bootable and NTFS is not yet supported; large install.wim files are split automatically."
         }
 
         return nil
