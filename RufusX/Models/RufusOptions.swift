@@ -214,7 +214,7 @@ struct RufusOptions {
         partitionScheme: PartitionScheme = .mbr,
         targetSystem: TargetSystem = .uefi,
         volumeLabel: String = "RufusX",
-        fileSystem: FileSystemType = .exfat,
+        fileSystem: FileSystemType = .fat32,
         clusterSize: ClusterSize = .auto,
         quickFormat: Bool = true,
         createExtendedLabel: Bool = true,
